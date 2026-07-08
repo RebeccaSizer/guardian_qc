@@ -47,20 +47,17 @@ author:	Rebecca Sizer
 #import subprocess
 #from terminaltables import AsciiTable
 from pathlib import Path
-from tools.utils.logger import logger
+from tools.utils.logger import logging
+import pandas as pd
+import re
 
 #this function gets the sample name from the file path 
-def get_file_name(file_path):
+def get_qc_summary_file_path():
     """
     Extract a sample name from a sequencing file path.
-
-    This function removes directory paths and common sequencing
-    file extensions (.tsv) from the input file path,
-    returning a clean base filename suitable for use as a sample ID.
     
     params: 
-        file_path : str
-            Full or relative path to a sequencing file.
+        None
 
     output:
         str
@@ -73,29 +70,129 @@ def get_file_name(file_path):
         'sample'
     """
     #Path allows you to manipulate windows paths on Unix machines
-    p = Path(file_path)  #Path navigates to that file path, newer and faster then os
-    name = p.stem 
-    suffix = p.suffix
+    root_file_path = Path("/mnt/dxstream/outputs")
+    qc_summary_file_paths = []
+    run_pattern = re.compile(r"^\d{6,8}_LH00537_\d{4}_[A-Z0-9]{7}LT1$") # Selects only NovaSeqX data (A01184 is the NovaSeq6000, LH00537 is the NovaSeqX)
+    run_pattern_sub = re.compile(r"^[0-9]{7}$")
+    qc_summary_pattern = re.compile(r"^[0-9]{7}\.RMH200STv3\.qc_summary\.tsv$")
+    
 
     try:
-        if suffix == ".tsv":
-            name = Path(name).stem #.stem gives the final component of the path without the suffix
-            print(f"Path(name).stem = {name}")
+        
+        for run in root_file_path.iterdir():
 
-        else:
-            print(f"incorrect file type found: {name}")
-            logger.error(f"incorrect file type: {name}")
-    
+            if run.is_dir() and run_pattern.match(run.name):
+            
+                run_id = run.name
+                build_path = run
+            
+
+                for i in build_path.iterdir():
+                    if i.is_dir() and run_pattern_sub.match(i.name):
+                        
+                        build_path = i
+
+                        for file_path in build_path.iterdir():
+                            if qc_summary_pattern.match(file_path.name):
+                        
+                                build_path = file_path
+                                qc_summary_file_paths.append({
+                                    "seq_run_number" : run_id,
+                                    "qc_file_path" : build_path
+                                })
+
+                            else:
+                                continue
+                    else:
+                        continue
+            else:
+                continue
+        
+        qc_file_paths = pd.DataFrame(
+            qc_summary_file_paths,
+            columns=[
+                "seq_run_number",
+                "qc_file_path",
+            ]
+        )
+
+        logging.info(f"{len(qc_file_paths)} qc_summary_file_paths loaded into a dataframe.")
+        return qc_file_paths           
+                
     except FileNotFoundError as e: 
         # Log the error.
-        logger.error(f"Variant Parser Error: Uploaded variant file '{filename}' not found: {e}")
+        logging.error(f"Variant Parser Error: Uploaded variant file '{filename}' not found: {e}")
 
-    return name
+#this function gets the sample name from the file path 
+def get_run_file_paths():
+    """
+    Gather all file paths to run folders 
+    
+    params: 
+        None
 
+    output:
+        df
+            contains sequence run folder and File paths 
+    
+    Examples:
+        get_run_file_paths()
+        
+    """
+    runs = []
+    run_pattern = re.compile(r"^\d{8}_LH00537_\d{4}_[A-Z0-9]{7}LT1$") # change this if I want to select specific times 
+
+    for run in Path("/mnt/dxstream/runs/NovaSeqX").iterdir():
+        if run.is_dir() and run_pattern.match(run.name):
+            runs.append({
+                "seq_run_number": run.name,
+                "run_qual_filepath": str(run),
+            })
+
+    run_file_paths = pd.DataFrame(
+        runs,
+        columns=[
+            "seq_run_number",
+            "run_qual_filepath",
+        ]
+    )
+    logging.info(f"{len(run_file_paths)} run_summary_file_paths loaded into a dataframe.")
+    return run_file_paths
+
+
+def merge_run_and_qc_data(df_run_metrics, df_sample_metrics):
+
+    df_merged = df_run_metrics.merge(df_sample_metrics,
+                                     on = "seq_run_number",
+                                     how = "left")
+    
+
+    def check_both_files_present(row):
+
+        run = pd.notna(row["run_qual_filepath"])
+        sample = pd.notna(row["qc_file_path"])
+
+        if run and sample:
+            return "Yes"
+        elif run:
+            return "Run QC metrics only"
+        elif sample:
+            return "Sample QC metrics only"
+        else:
+            return "No QC data"
+
+    df_merged["file_status"] = df_merged.apply(
+        check_both_files_present, 
+        axis = 1)
+
+    logging.info(f"Counts of complete and incomplete data sets: "
+                 f"{df_merged["file_status"].value_counts()}")
+    return df_merged 
 
 #test functions in script
 if __name__ == "__main__":
     file = "/C:/Users/nb28589/Desktop/project_test/2602781.RMH200ST.qc_summary.tv"
-    output = get_file_name(file)
-    print(output)
-
+    output_run_folder = get_run_file_paths()
+    output_qc_file = get_qc_summary_file_path()
+    merged_output = merge_run_and_qc_data(output_run_folder, output_qc_file)
+    print(merged_output)
