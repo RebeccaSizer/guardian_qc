@@ -191,7 +191,6 @@ def merge_run_and_qc_data(df_run_metrics, df_sample_metrics):
 
 #test functions in script
 if __name__ == "__main__":
-    file = "/C:/Users/nb28589/Desktop/project_test/2602781.RMH200ST.qc_summary.tv"
     output_run_folder = get_run_file_paths()
     output_qc_file = get_qc_summary_file_path()
     merged_output = merge_run_and_qc_data(output_run_folder, output_qc_file)
