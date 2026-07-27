@@ -83,7 +83,6 @@ def get_qc_summary_file_path():
     qc_summary_pattern_haem_v2 = re.compile(r"^[0-9]{7}\.RMHhaemV2\.qc_summary\.tsv$")
     qc_summary_pattern_haem_v3 = re.compile(r"^[0-9]{7}\.RMHhaemV3\.qc_summary\.tsv$")
     
-
     try:
         
         for run in root_file_path.iterdir():
@@ -92,49 +91,54 @@ def get_qc_summary_file_path():
             
                 run_id = run.name
                 build_path = run
-            
 
                 for i in build_path.iterdir():
                     if i.is_dir() and run_pattern_sub.match(i.name):
                         
                         build_path = i
+                        worklist = i.name
 
                         for file_path in build_path.iterdir():
-                            if qc_summary_pattern_st_v3.match(file_path.name):
+                            if qc_summary_pattern_st_v3.match(file_path.name) and file_path.name[0:7] == worklist:
                         
                                 build_path = file_path
                                 qc_summary_file_paths.append({
                                     "seq_run_number" : run_id,
+                                    "worklist" : worklist,
                                     "qc_file_path" : build_path,
                                     "sequencer" : "novaseqx",
                                     "cancer_type" : "solid_tumour_v3"
                                 })
+
                             
-                            elif qc_summary_pattern_st.match(file_path.name):
+                            elif qc_summary_pattern_st.match(file_path.name) and file_path.name[0:7] == worklist:
                         
                                 build_path = file_path
                                 qc_summary_file_paths.append({
                                     "seq_run_number" : run_id,
+                                    "worklist" : worklist,
                                     "qc_file_path" : build_path,
                                     "sequencer" : "novaseqx",
                                     "cancer_type" : "solid_tumour"
                                 })
                             
-                            elif qc_summary_pattern_haem_v2.match(file_path.name):
+                            elif qc_summary_pattern_haem_v2.match(file_path.name) and file_path.name[0:7] == worklist:
                         
                                 build_path = file_path
                                 qc_summary_file_paths.append({
                                     "seq_run_number" : run_id,
+                                    "worklist" : worklist,
                                     "qc_file_path" : build_path,
                                     "sequencer" : "novaseqx",
                                     "cancer_type" : "haem_v2"
                                 })
                             
-                            elif qc_summary_pattern_haem_v3.match(file_path.name):
+                            elif qc_summary_pattern_haem_v3.match(file_path.name) and file_path.name[0:7] == worklist:
                         
                                 build_path = file_path
                                 qc_summary_file_paths.append({
                                     "seq_run_number" : run_id,
+                                    "worklist" : worklist,
                                     "qc_file_path" : build_path,
                                     "sequencer" : "novaseqx",
                                     "cancer_type" : "haem_v3"
@@ -155,43 +159,48 @@ def get_qc_summary_file_path():
                     if i.is_dir() and run_pattern_sub.match(i.name):
                         
                         build_path = i
+                        worklist = i.name
 
                         for file_path in build_path.iterdir():
-                            if qc_summary_pattern_st_v3.match(file_path.name):
+                            if qc_summary_pattern_st_v3.match(file_path.name) and file_path.name[0:7] == worklist:
                         
                                 build_path = file_path
                                 qc_summary_file_paths.append({
                                     "seq_run_number" : run_id,
+                                    "worklist" : worklist,
                                     "qc_file_path" : build_path,
                                     "sequencer" : "novaseq6000",
                                     "cancer_type" : "solid_tumour_v3"
                                 })
                             
-                            elif qc_summary_pattern_st.match(file_path.name):
+                            elif qc_summary_pattern_st.match(file_path.name) and file_path.name[0:7] == worklist:
                         
                                 build_path = file_path
                                 qc_summary_file_paths.append({
                                     "seq_run_number" : run_id,
+                                    "worklist" : worklist,
                                     "qc_file_path" : build_path,
                                     "sequencer" : "novaseq6000",
                                     "cancer_type" : "solid_tumour"
                                 })
                             
-                            elif qc_summary_pattern_haem_v2.match(file_path.name):
+                            elif qc_summary_pattern_haem_v2.match(file_path.name) and file_path.name[0:7] == worklist:
                         
                                 build_path = file_path
                                 qc_summary_file_paths.append({
                                     "seq_run_number" : run_id,
+                                    "worklist" : worklist,
                                     "qc_file_path" : build_path,
                                     "sequencer" : "novaseq6000",
                                     "cancer_type" : "haem_v2"
                                 })
                             
-                            elif qc_summary_pattern_haem_v3.match(file_path.name):
+                            elif qc_summary_pattern_haem_v3.match(file_path.name) and file_path.name[0:7] == worklist:
                         
                                 build_path = file_path
                                 qc_summary_file_paths.append({
                                     "seq_run_number" : run_id,
+                                    "worklist" : worklist,
                                     "qc_file_path" : build_path,
                                     "sequencer" : "novaseq6000",
                                     "cancer_type" : "haem_v3"
@@ -208,6 +217,7 @@ def get_qc_summary_file_path():
             qc_summary_file_paths,
             columns=[
                 "seq_run_number",
+                "worklist",
                 "qc_file_path",
                 "sequencer",
                 "cancer_type"
@@ -294,6 +304,8 @@ def merge_run_and_qc_data(df_run_metrics, df_sample_metrics):
     df_merged["file_status"] = df_merged.apply(
         check_both_files_present, 
         axis = 1)
+    
+    df_merged.to_csv("file_paths.csv", sep='\t', header=True, index=False)
 
     logging.info(
         f"Counts of complete and incomplete data sets: "
@@ -303,6 +315,10 @@ def merge_run_and_qc_data(df_run_metrics, df_sample_metrics):
     )
     
     return df_merged 
+
+#def get_sample_sheet():
+
+
 
 #test functions in script
 if __name__ == "__main__":
