@@ -1,56 +1,61 @@
 """ 
  This script processes and filters the run metrics so that only
  samples that pass run level metrics are kept"""
-from tools.modules.inter_op import run_qc_summary
+import logging
+
+from tools.modules.inter_op import inter_op_qc
 import pandas as pd
 from pathlib import Path
 
 def filter_run_qc(df):
 
     pass_list = []
-    
-    for run_folder_path in df["run_qual_filepath"]:
-        run_df = run_qc_summary(run_folder_path)
+
+    for _, row in df.iterrows():
+
+        run_folder_path = row["run_qual_filepath"]
         run_folder_name = Path(run_folder_path).name
 
-        run_both_columns = run_df.loc[2]
+        run_df = inter_op_qc(run_folder_path)
 
-        if run_both_columns["Percent Q30"] >= 80 and run_both_columns["Error Rate"] <= 2:
+        # Select the correct row of the InterOp summary
+        lane = row["lane"]
 
-            pass_list.append({
-                "seq_run_number" : run_folder_name,
-                "pass_run_qc" : "Yes"
-            })
-
-        elif run_both_columns["Percent Q30"] < 80 and run_both_columns["Error Rate"] <= 2:
-
-            pass_list.append({
-                            "seq_run_number" : run_folder_name,
-                            "pass_run_qc" : "Percent Q30 < 80"
-                        })
-
-        elif run_both_columns["Percent Q30"] >= 80 and run_both_columns["Error Rate"] > 2:
-        
-                    pass_list.append({
-                                    "seq_run_number" : run_folder_name,
-                                    "pass_run_qc" : "Error rate > 2"
-                                })
-
+        if lane == [1]:
+            run_columns = run_df.loc[0]
+        elif lane == [2]:
+            run_columns = run_df.loc[1]
+        elif lane == [1, 2]:
+            run_columns = run_df.loc[2]
+        elif lane is None:
+            logging.warning(f"Lane information is missing for run {run_folder_name}. Skipping this run.")
+            continue
         else:
-            pass_list.append({
-                            "seq_run_number" : run_folder_name,
-                            "pass_run_qc" : "Percent Q30 < 80 AND Error rate > 2"
-                        })
+            raise ValueError(f"Unexpected lane value: {lane}")
 
-    pass_filtering_df = pd.DataFrame(pass_list, columns=["seq_run_number", "pass_run_qc"])
+        q30 = run_columns["Percent Q30"]
+        error_rate = run_columns["Error Rate"]
 
-    return pass_filtering_df
+        if q30 >= 80 and error_rate <= 2:
+            status = "Yes"
+        elif q30 < 80 and error_rate <= 2:
+            status = "Percent Q30 < 80"
+        elif q30 >= 80 and error_rate > 2:
+            status = "Error rate > 2"
+        else:
+            status = "Percent Q30 < 80 AND Error rate > 2"
 
+        pass_list.append({
+            "seq_run_number": run_folder_name,
+            "pass_run_qc": status
+        })
+
+    return pd.DataFrame(pass_list)
 
 
 if __name__=="__main__":
 
-     df = pd.DataFrame({
+    df = pd.DataFrame({
     "seq_run_number": [
         "20260716_LH00537_0196_A22KWG7LT1",
         "20260716_LH00537_0196_A22KWG7LT1",
@@ -135,7 +140,7 @@ if __name__=="__main__":
         "Yes",
         "Yes",
     ]
-})
+    })
 
-df_run_pass = filter_run_qc(df)
-print(df_run_pass)
+    df_run_pass = filter_run_qc(df)
+    print(df_run_pass)

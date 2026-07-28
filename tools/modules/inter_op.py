@@ -9,7 +9,7 @@ import pandas as pd
 from tools.utils.logger import logger
 
 # The following code was written by MW and edited by RS.
-def run_qc_summary(run_path):
+def inter_op_qc(run_path):
     """parse run QC by lane and total
     Run QC data is stored in the Interops folder 
     """

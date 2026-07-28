@@ -261,7 +261,7 @@ def get_run_file_paths():
                 "seq_run_number": run.name,
                 "run_qual_filepath": str(run),
                 "sample_sheet_path": "No sample sheet found",
-                "lane": "None"
+                "lane": None
             }
 
             for file in run.iterdir():
@@ -283,7 +283,7 @@ def get_run_file_paths():
                 "seq_run_number": run.name,
                 "run_qual_filepath": str(run),
                 "sample_sheet_path": "No sample sheet found",
-                "lane" : "1 and 2"
+                "lane" : [1, 2]
             }
 
             for file in run.iterdir():
@@ -329,26 +329,26 @@ def helper_get_lane(file_path):
 
         if "Lane" not in df_lane_info.columns:
             logging.warning(f"Lane column not found in sample sheet: {file_path}")
-            return "Unknown"
+            return None
 
         elif df_lane_info["Lane"].isnull().all():
             logging.warning(f"Lane column is empty in sample sheet: {file_path}")
-            return "Unknown"
+            return None
 
         else:
 
             lanes = sorted(df_lane_info["Lane"].unique())
 
             if lanes == [1]:
-                return "1"
+                return [1]
             elif lanes == [2]:
-                return "2"
+                return [2]
             elif lanes == [1, 2]:
-                return "1 and 2"
+                return [1, 2]
 
     except Exception as e:
         logging.error(f"Error reading sample sheet {file_path}: {e}")
-        return "Unknown"
+        return None
 
 
 def merge_run_and_qc_data(df_run_metrics, df_sample_metrics):
@@ -393,4 +393,3 @@ if __name__ == "__main__":
     output_run_folder = get_run_file_paths()
     output_qc_file = get_qc_summary_file_path()
     merged_output = merge_run_and_qc_data(output_run_folder, output_qc_file)
-    print(merged_output)
