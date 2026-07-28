@@ -229,7 +229,7 @@ def get_qc_summary_file_path():
                 
     except FileNotFoundError as e: 
         # Log the error.
-        logging.error(f"Variant Parser Error: Uploaded variant file '{filename}' not found: {e}")
+        logging.error(f"Variant Parser Error: Uploaded variant file '{qc_file_paths}' not found: {e}")
 
 #this function gets the sample name from the file path 
 def get_run_file_paths():
@@ -253,31 +253,102 @@ def get_run_file_paths():
 
     run_pattern_novaseqx = re.compile(r"^\d{6,8}_LH00537_\d{4}_[A-Z0-9]{10}$")
     run_pattern_novaseq6000 = re.compile(r"^\d{6,8}_A01184_\d{4}_[A-Z0-9]{10}$")
+    sample_sheet_pattern = re.compile(r"^SampleSheet\.csv$")
 
     for run in novaseqx_path.iterdir():
         if run.is_dir() and run_pattern_novaseqx.match(run.name):
-            runs.append({
+            run_info = {
                 "seq_run_number": run.name,
                 "run_qual_filepath": str(run),
-            })
+                "sample_sheet_path": "No sample sheet found",
+                "lane": "None"
+            }
+
+            for file in run.iterdir():
+
+                if file.is_file() and sample_sheet_pattern.match(file.name):
+
+                    run_info["sample_sheet_path"] = str(file)
+
+                    lane_info = helper_get_lane(file)
+                    run_info["lane"] = lane_info
+                    break  # assuming only one sample sheet per run
+
+            runs.append(run_info)
     
     for run in novaseq6000_path.iterdir():
         
         if run.is_dir() and run_pattern_novaseq6000.match(run.name):
-            runs.append({
+            run_info = {
                 "seq_run_number": run.name,
                 "run_qual_filepath": str(run),
-            })
+                "sample_sheet_path": "No sample sheet found",
+                "lane" : "1 and 2"
+            }
+
+            for file in run.iterdir():
+                if file.is_file() and sample_sheet_pattern.match(file.name):
+                    run_info["sample_sheet_path"] = str(file)
+                    break  # assuming only one sample sheet per run
+
+            runs.append(run_info)
 
     run_file_paths = pd.DataFrame(
         runs,
         columns=[
             "seq_run_number",
             "run_qual_filepath",
+            "sample_sheet_path",
+            "lane"
         ]
     )
     logging.info(f"{len(run_file_paths)} run_summary_file_paths loaded into a dataframe.")
+    print(run_file_paths)
     return run_file_paths
+
+############################################################
+def helper_get_lane(file_path):
+
+    """
+    Gather all file paths to sample sheets 
+    
+    params: 
+        None
+
+    output:
+        df
+            contains sequence run folder and File paths 
+    
+    Examples:
+        helper_get_lane()
+    """
+
+    try:
+
+        df_lane_info = pd.read_csv(file_path, skiprows=15, header=0)
+
+        if "Lane" not in df_lane_info.columns:
+            logging.warning(f"Lane column not found in sample sheet: {file_path}")
+            return "Unknown"
+
+        elif df_lane_info["Lane"].isnull().all():
+            logging.warning(f"Lane column is empty in sample sheet: {file_path}")
+            return "Unknown"
+
+        else:
+
+            lanes = sorted(df_lane_info["Lane"].unique())
+
+            if lanes == [1]:
+                return "1"
+            elif lanes == [2]:
+                return "2"
+            elif lanes == [1, 2]:
+                return "1 and 2"
+
+    except Exception as e:
+        logging.error(f"Error reading sample sheet {file_path}: {e}")
+        return "Unknown"
 
 
 def merge_run_and_qc_data(df_run_metrics, df_sample_metrics):
@@ -315,9 +386,6 @@ def merge_run_and_qc_data(df_run_metrics, df_sample_metrics):
     )
     
     return df_merged 
-
-#def get_sample_sheet():
-
 
 
 #test functions in script
