@@ -10,8 +10,23 @@ from tools.utils.logger import logger
 
 # The following code was written by MW and edited by RS.
 def inter_op_qc(run_path):
-    """parse run QC by lane and total
-    Run QC data is stored in the Interops folder 
+    """
+    Function to extract run-level QC metrics from the InterOp folder of a sequencing run.
+    The function reads the InterOp files, summarizes the run metrics, and returns a DataFrame
+    containing the following metrics for each lane and the full run:
+    
+    - Lane number
+    - Yield in gigabases (Gb)
+    - Percent of bases with quality score >= 30 (Percent Q30)
+    - Percent of clusters passing filter (Percent PF)
+    - Error rate (Error Rate)
+
+    params:
+        run_path (str): Path to the InterOp folder of the sequencing run.
+
+    output:
+        pd.DataFrame: DataFrame containing the summarized run-level QC metrics for each lane and the full run.
+
     """
     
     # get full path for run folder
@@ -24,18 +39,18 @@ def inter_op_qc(run_path):
     py_interop_summary.summarize_run_metrics(run_metrics, summary)
 
     # Explore the data
-    print(run_metrics)
-    print(type(run_metrics))
+    #print(run_metrics)
+    #print(type(run_metrics))
 
-    print(summary)
-    print(type(summary))
+    #print(summary)
+    #print(type(summary))
     
     # extract number of lanes and reads
     lane_count = summary.lane_count()
     read_count = summary.size()
 
-    print(f"Lane count: {summary.lane_count()}")
-    print(f"Read count: {summary.size()}")
+    #print(f"Lane count: {summary.lane_count()}")
+    #print(f"Read count: {summary.size()}")
     
     # gather data
     data = []
@@ -63,12 +78,12 @@ def inter_op_qc(run_path):
     df = pd.DataFrame(data)
     # reorder columns
     df = df[['Lane', 'Percent Q30', 'Error Rate', 'Percent PF', 'Yield Gb']]
-    print(df)
+    #print(df)
     return df
 
 
 if __name__ == "__main__":
-    qc_summary = run_qc_summary("/mnt/dxstream/runs/NovaSeqX/20260716_LH00537_0196_A22KWG7LT1")
+    qc_summary = inter_op_qc("/mnt/dxstream/runs/NovaSeq/241129_A01184_0704_AHJGHTDRX5")
     #with open(output, "w") as f:
     #    qc_summary.to_csv(output, sep="\t", header=True, index=False)
     #print(qc_summary.to_string(index=False))

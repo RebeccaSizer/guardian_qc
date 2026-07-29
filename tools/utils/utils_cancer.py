@@ -1,218 +1,122 @@
-"""guardian_qc utils
+"""guardian_qc utils_cancer.py
 
 Util functions used by guardian_qc.
 
 Methods
 -------
 
-get_path_info()
-	given a file path, this function extracts the files directory, the 
-	base file name, and its ending
-get_help_text()
-	returns a formatted string describing the seqQscorer help text
-clf_full_names(abbr)
-	given one of the abbreviations, this function returns the full name of
-	the algorithm. Used to clarify the terminal output
-get_best_classifier(utils_dir, species, assay, run_type, feature_sets, fs_suffix, metric)
-	given the user specifications from seqQscorer, this function parses a text table
-	in order to return the classifier and feature selection specifications that are most 
-	recommendable for the application
-read_in_measure_table(utils_dir, species, assay, run_type, feature_sets, fs_suffix, metric)
-	seqQscorer prints a table with machine learning evaluation measures for different decision 
-	thresholds. The source file with this information is parsed by this function
-def get_clf_algos()
-	this function creates and returns a dictionary of default classifier configuratons
+get_qc_summary_file_path()
+	gathers all qc_summary_file_paths from the /mnt/dxstream/outputs directory 
+    and returns a dataframe with the following columns:
+        - seq_run_number
+        - worklist
+        - qc_file_path
+        - sequencer
+        - cancer_type
+
+get_run_file_paths()
+    gathers all run_summary_file_paths and all sample_sheet_file_paths 
+    from the /mnt/dxstream/runs directory and returns a dataframe with
+    the following columns:
+        - seq_run_number
+        - run_qual_filepath
+        - sample_sheet_path
+
+helper_get_lane()
+    helper function to get the lane information from the sample sheet
+    returns a list of lanes present in the sample sheet.
+
+merge_run_and_qc_data()
+    merges the run_summary_file_paths and qc_summary_file_paths dataframes
+    on the seq_run_number column and returns a merged dataframe with the following columns:
+        - seq_run_number
+        - run_qual_filepath
+        - sample_sheet_path
+        - worklist
+        - qc_file_path
+        - sequencer
+        - cancer_type
+        - file_status
 
 date:	2026-02-03
 author:	Rebecca Sizer
 
 """
-
-#Check all imports are used
-
-#from sklearn.ensemble import RandomForestClassifier
-#from sklearn.ensemble import GradientBoostingClassifier
-#from sklearn.linear_model import LogisticRegression
-#from sklearn.svm import SVC
-#from sklearn.neighbors import KNeighborsClassifier
-#from sklearn.naive_bayes import GaussianNB
-#from sklearn.neural_network import MLPClassifier
-#from sklearn.tree import DecisionTreeClassifier
-#from sklearn.ensemble import AdaBoostClassifier
-#from sklearn.tree import ExtraTreeClassifier
-
-#import os
-#import json
-#import pandas as pd
-#import subprocess
-#from terminaltables import AsciiTable
-from pathlib import Path
+# Import necessary modules
 from tools.utils.logger import logging
-import pandas as pd
-import re
+from tools.utils import config
 
-#this function gets the sample name from the file path 
+# Import pandas for data manipulation
+import pandas as pd
+
+
+# This function gets the sample name from the file path 
 def get_qc_summary_file_path():
     """
-    Extract a sample name from a sequencing file path.
-    
-    params: 
+    Gather all file paths to qc_summary files for 
+    both the NovaSeqX and NovaSeq6000 platforms.
+
+    params:
         None
 
     output:
-        str
-            The base filename with path and extensions removed.
-    
-    Examples:
-        get_file_name("/data/sample.fastq.gz")
-        'sample'
-        getFileName("reads/sample.fq")
-        'sample'
+        df
+            contains sequence run folder and File paths
+
     """
-    #Path allows you to manipulate windows paths on Unix machines
-    root_file_path = Path("/mnt/dxstream/outputs")
+
     qc_summary_file_paths = []
 
-    run_pattern_novaseqx = re.compile(r"^\d{6,8}_LH00537_\d{4}_[A-Z0-9]{10}$")
-    run_pattern_novaseq6000 = re.compile(r"^\d{6,8}_A01184_\d{4}_[A-Z0-9]{10}$")
-    
-    run_pattern_sub = re.compile(r"^[0-9]{7}$")
-    
-    qc_summary_pattern_st_v3 = re.compile(r"^[0-9]{7}\.RMH200STv3\.qc_summary\.tsv$")
-    qc_summary_pattern_st = re.compile(r"^[0-9]{7}\.RMH200ST\.qc_summary\.tsv$")
-    qc_summary_pattern_haem_v2 = re.compile(r"^[0-9]{7}\.RMHhaemV2\.qc_summary\.tsv$")
-    qc_summary_pattern_haem_v3 = re.compile(r"^[0-9]{7}\.RMHhaemV3\.qc_summary\.tsv$")
-    
+    qc_patterns = {
+        "solid_tumour_v3": config.QC_SUMMARY_PATTERN_ST_V3,
+        "solid_tumour": config.QC_SUMMARY_PATTERN_ST,
+        "haem_v2": config.QC_SUMMARY_PATTERN_HAEM_V2,
+        "haem_v3": config.QC_SUMMARY_PATTERN_HAEM_V3,
+    }
+
+    logging.info("Gathering qc_summary file paths from the outputs directory.")
+
     try:
         
-        for run in root_file_path.iterdir():
+        for run in config.ROOT_FILE_PATH.iterdir():
 
-            if run.is_dir() and run_pattern_novaseqx.match(run.name):
-            
-                run_id = run.name
-                build_path = run
-
-                for i in build_path.iterdir():
-                    if i.is_dir() and run_pattern_sub.match(i.name):
-                        
-                        build_path = i
-                        worklist = i.name
-
-                        for file_path in build_path.iterdir():
-                            if qc_summary_pattern_st_v3.match(file_path.name) and file_path.name[0:7] == worklist:
-                        
-                                build_path = file_path
-                                qc_summary_file_paths.append({
-                                    "seq_run_number" : run_id,
-                                    "worklist" : worklist,
-                                    "qc_file_path" : build_path,
-                                    "sequencer" : "novaseqx",
-                                    "cancer_type" : "solid_tumour_v3"
-                                })
-
-                            
-                            elif qc_summary_pattern_st.match(file_path.name) and file_path.name[0:7] == worklist:
-                        
-                                build_path = file_path
-                                qc_summary_file_paths.append({
-                                    "seq_run_number" : run_id,
-                                    "worklist" : worklist,
-                                    "qc_file_path" : build_path,
-                                    "sequencer" : "novaseqx",
-                                    "cancer_type" : "solid_tumour"
-                                })
-                            
-                            elif qc_summary_pattern_haem_v2.match(file_path.name) and file_path.name[0:7] == worklist:
-                        
-                                build_path = file_path
-                                qc_summary_file_paths.append({
-                                    "seq_run_number" : run_id,
-                                    "worklist" : worklist,
-                                    "qc_file_path" : build_path,
-                                    "sequencer" : "novaseqx",
-                                    "cancer_type" : "haem_v2"
-                                })
-                            
-                            elif qc_summary_pattern_haem_v3.match(file_path.name) and file_path.name[0:7] == worklist:
-                        
-                                build_path = file_path
-                                qc_summary_file_paths.append({
-                                    "seq_run_number" : run_id,
-                                    "worklist" : worklist,
-                                    "qc_file_path" : build_path,
-                                    "sequencer" : "novaseqx",
-                                    "cancer_type" : "haem_v3"
-                                })
-
-                            else:
-                                continue
-                    else:
-                        continue
-            
-            elif run.is_dir() and run_pattern_novaseq6000.match(run.name):
-            
-                run_id = run.name
-                build_path = run
-            
-
-                for i in build_path.iterdir():
-                    if i.is_dir() and run_pattern_sub.match(i.name):
-                        
-                        build_path = i
-                        worklist = i.name
-
-                        for file_path in build_path.iterdir():
-                            if qc_summary_pattern_st_v3.match(file_path.name) and file_path.name[0:7] == worklist:
-                        
-                                build_path = file_path
-                                qc_summary_file_paths.append({
-                                    "seq_run_number" : run_id,
-                                    "worklist" : worklist,
-                                    "qc_file_path" : build_path,
-                                    "sequencer" : "novaseq6000",
-                                    "cancer_type" : "solid_tumour_v3"
-                                })
-                            
-                            elif qc_summary_pattern_st.match(file_path.name) and file_path.name[0:7] == worklist:
-                        
-                                build_path = file_path
-                                qc_summary_file_paths.append({
-                                    "seq_run_number" : run_id,
-                                    "worklist" : worklist,
-                                    "qc_file_path" : build_path,
-                                    "sequencer" : "novaseq6000",
-                                    "cancer_type" : "solid_tumour"
-                                })
-                            
-                            elif qc_summary_pattern_haem_v2.match(file_path.name) and file_path.name[0:7] == worklist:
-                        
-                                build_path = file_path
-                                qc_summary_file_paths.append({
-                                    "seq_run_number" : run_id,
-                                    "worklist" : worklist,
-                                    "qc_file_path" : build_path,
-                                    "sequencer" : "novaseq6000",
-                                    "cancer_type" : "haem_v2"
-                                })
-                            
-                            elif qc_summary_pattern_haem_v3.match(file_path.name) and file_path.name[0:7] == worklist:
-                        
-                                build_path = file_path
-                                qc_summary_file_paths.append({
-                                    "seq_run_number" : run_id,
-                                    "worklist" : worklist,
-                                    "qc_file_path" : build_path,
-                                    "sequencer" : "novaseq6000",
-                                    "cancer_type" : "haem_v3"
-                                })
-
-                            else:
-                                continue
-                    else:
-                        continue 
-            else:
+            if not run.is_dir():
                 continue
-        
+
+            if config.RUN_PATTERN_NOVASEQX.match(run.name):
+                sequencer = "novaseqx"
+            elif config.RUN_PATTERN_NOVASEQ6000.match(run.name):
+                sequencer = "novaseq6000"
+            else:
+                continue  # Skip directories that don't match either pattern
+
+            run_id = run.name
+
+            for worklist_dir in run.iterdir():
+                if worklist_dir.is_dir() and config.RUN_PATTERN_SUB.match(worklist_dir.name):
+                        
+                    worklist = worklist_dir.name
+
+                    for file_path in worklist_dir.iterdir():
+
+                        if file_path.name[0:7] != worklist:
+                            continue  # Skip files that don't start with the worklist number
+
+                        for cancer_type, pattern in qc_patterns.items():
+
+                            if pattern.match(file_path.name):
+
+                                qc_summary_file_paths.append(
+                                    {
+                                        "seq_run_number": run_id,
+                                        "worklist": worklist,
+                                        "qc_file_path": file_path,
+                                        "sequencer": sequencer,
+                                        "cancer_type": cancer_type,
+                                    }
+                                )
+                                break
+
         qc_file_paths = pd.DataFrame(
             qc_summary_file_paths,
             columns=[
@@ -225,11 +129,14 @@ def get_qc_summary_file_path():
         )
 
         logging.info(f"{len(qc_file_paths)} qc_summary_file_paths loaded into a dataframe.")
-        return qc_file_paths           
-                
+
+        return qc_file_paths
+
     except FileNotFoundError as e: 
         # Log the error.
-        logging.error(f"Variant Parser Error: Uploaded variant file '{qc_file_paths}' not found: {e}")
+        logging.error(f"FileNotFoundError: {e}")
+
+
 
 #this function gets the sample name from the file path 
 def get_run_file_paths():
@@ -247,16 +154,12 @@ def get_run_file_paths():
         get_run_file_paths()
         
     """
+    logging.info("Gathering run file paths from the runs directory.")
+
     runs = []
-    novaseqx_path = Path("/mnt/dxstream/runs/NovaSeqX")
-    novaseq6000_path = Path("/mnt/dxstream/runs/NovaSeq")
 
-    run_pattern_novaseqx = re.compile(r"^\d{6,8}_LH00537_\d{4}_[A-Z0-9]{10}$")
-    run_pattern_novaseq6000 = re.compile(r"^\d{6,8}_A01184_\d{4}_[A-Z0-9]{10}$")
-    sample_sheet_pattern = re.compile(r"^SampleSheet\.csv$")
-
-    for run in novaseqx_path.iterdir():
-        if run.is_dir() and run_pattern_novaseqx.match(run.name):
+    for run in config.NOVASEQX_PATH.iterdir():
+        if run.is_dir() and config.RUN_PATTERN_NOVASEQX.match(run.name):
             run_info = {
                 "seq_run_number": run.name,
                 "run_qual_filepath": str(run),
@@ -266,7 +169,7 @@ def get_run_file_paths():
 
             for file in run.iterdir():
 
-                if file.is_file() and sample_sheet_pattern.match(file.name):
+                if file.is_file() and config.SAMPLE_SHEET_PATTERN.match(file.name):
 
                     run_info["sample_sheet_path"] = str(file)
 
@@ -276,19 +179,20 @@ def get_run_file_paths():
 
             runs.append(run_info)
     
-    for run in novaseq6000_path.iterdir():
+    for run in config.NOVASEQ6000_PATH.iterdir():
         
-        if run.is_dir() and run_pattern_novaseq6000.match(run.name):
+        if run.is_dir() and config.RUN_PATTERN_NOVASEQ6000.match(run.name):
             run_info = {
                 "seq_run_number": run.name,
                 "run_qual_filepath": str(run),
                 "sample_sheet_path": "No sample sheet found",
-                "lane" : [1, 2]
+                "lane" : None
             }
 
             for file in run.iterdir():
-                if file.is_file() and sample_sheet_pattern.match(file.name):
+                if file.is_file() and config.SAMPLE_SHEET_PATTERN.match(file.name):
                     run_info["sample_sheet_path"] = str(file)
+                    run_info["lane"] = [8] # NovaSeq6000 has 8 lanes which do not need to be separated into individual lanes for this analysis
                     break  # assuming only one sample sheet per run
 
             runs.append(run_info)
@@ -303,7 +207,6 @@ def get_run_file_paths():
         ]
     )
     logging.info(f"{len(run_file_paths)} run_summary_file_paths loaded into a dataframe.")
-    print(run_file_paths)
     return run_file_paths
 
 ############################################################
@@ -352,6 +255,26 @@ def helper_get_lane(file_path):
 
 
 def merge_run_and_qc_data(df_run_metrics, df_sample_metrics):
+    """
+    Merge the run_summary_file_paths and qc_summary_file_paths dataframes
+    on the seq_run_number column and return a merged dataframe with the following columns:
+        - seq_run_number
+        - run_qual_filepath
+        - sample_sheet_path
+        - worklist
+        - qc_file_path
+        - sequencer
+        - cancer_type
+        - file_status
+
+        params:
+            df_run_metrics: DataFrame containing run_summary_file_paths
+            df_sample_metrics: DataFrame containing qc_summary_file_paths
+            
+        output:
+            df_merged: Merged DataFrame containing both run and qc summary file paths
+            
+        """
 
     df_merged = df_run_metrics.merge(df_sample_metrics,
                                      on = "seq_run_number",
@@ -376,16 +299,46 @@ def merge_run_and_qc_data(df_run_metrics, df_sample_metrics):
         check_both_files_present, 
         axis = 1)
     
-    df_merged.to_csv("file_paths.csv", sep='\t', header=True, index=False)
+    df_merged.to_csv("outputs/file_paths.csv", sep='\t', header=True, index=False)
+
+    counts = (
+        df_merged.groupby(["sequencer", "cancer_type"])
+        .size()
+        .reset_index(name="count")
+    )
 
     logging.info(
         f"Counts of complete and incomplete data sets: "
-        f"{df_merged['file_status'].value_counts()}"
+        f"{df_merged['file_status'].value_counts()}" \
         "\nCounts of data by sequencer and cancer type:" \
-        f"{df_merged.value_counts(['sequencer', 'cancer_type'])}"
+        f"{counts}"
     )
     
     return df_merged 
+
+def filter_df(merged_dataframe):
+    """
+    Filter the merged dataframe to include only rows where:
+    - file_status is 'Yes'
+    - lane is not None
+    
+    params:
+        merged_dataframe: DataFrame containing merged run and qc summary file paths
+    
+    output:
+        filtered_df: Filtered DataFrame containing only rows that meet the criteria
+    """
+
+    pass_filter = []
+
+    for _, row in merged_dataframe.iterrows():
+
+        if row["file_status"] == "Yes" and row["lane"] is not None:
+            pass_filter.append(row)
+
+    filtered_df = pd.DataFrame(pass_filter)
+    logging.info(f"Filtered dataframe contains {len(filtered_df)} rows after applying QC and lane filters.")
+    return filtered_df
 
 
 #test functions in script
@@ -393,3 +346,12 @@ if __name__ == "__main__":
     output_run_folder = get_run_file_paths()
     output_qc_file = get_qc_summary_file_path()
     merged_output = merge_run_and_qc_data(output_run_folder, output_qc_file)
+    filtered_output = filter_df(merged_output)
+
+# exploration of merged_output dataframe
+# 827 runs do not have QC_Summary files
+# 46 runs do not have SampleSheet files
+# 627 rows pass filtering criteria (file_status == 'Yes' and lane is not None)
+    #print(filtered_output.isna().sum())
+    #print(f"Missing lane values: {filtered_output['lane'].isna().sum()}")
+    #print(f"Missing sample_qc_path values: {filtered_output['qc_file_path'].isna().sum()}")

@@ -212,4 +212,7 @@ __marimo__/
 
 ./temp_venv
 
-file_paths.csv
+
+# Files to ignore for this project
+*.csv
+

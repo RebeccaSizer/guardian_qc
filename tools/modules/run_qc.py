@@ -1,13 +1,31 @@
 """ 
  This script processes and filters the run metrics so that only
  samples that pass run level metrics are kept"""
-import logging
-
-from tools.modules.inter_op import inter_op_qc
 import pandas as pd
 from pathlib import Path
 
+from tools.utils.logger import logging
+from tools.modules.inter_op import inter_op_qc
+
+
 def filter_run_qc(df):
+    """
+    Filter the dataframe to include only runs that pass run level QC metrics.
+    The function checks the 'Percent Q30' and 'Error Rate' for each run and
+    determines if the run passes QC based on the following criteria:
+
+    - If 'Percent Q30' >= 80 and 'Error Rate' <= 2
+    - If 'Percent Q30' < 80 and 'Error Rate' is NaN
+    
+    If a run does not meet these criteria, it is marked as failing QC.
+    
+    params:
+        df (pd.DataFrame): DataFrame containing run metrics and QC information.
+    
+    output:
+        pd.DataFrame: Filtered DataFrame containing only runs that pass QC.
+        
+    """
 
     pass_list = []
 
@@ -18,25 +36,33 @@ def filter_run_qc(df):
 
         run_df = inter_op_qc(run_folder_path)
 
-        # Select the correct row of the InterOp summary
-        lane = row["lane"]
+        if pd.notna(row["sequencer"]) and "novaseqx" in row["sequencer"].lower():
+            # Select the correct row of the InterOp summary
+            lane = row["lane"]
 
-        if lane == [1]:
-            run_columns = run_df.loc[0]
-        elif lane == [2]:
-            run_columns = run_df.loc[1]
-        elif lane == [1, 2]:
-            run_columns = run_df.loc[2]
-        elif lane is None:
-            logging.warning(f"Lane information is missing for run {run_folder_name}. Skipping this run.")
-            continue
+            if lane == [1]:
+                run_columns = run_df.loc[0]
+            elif lane == [2]:
+                run_columns = run_df.loc[1]
+            elif lane == [1, 2]:
+                run_columns = run_df.loc[2]
+            elif lane is None:
+                logging.warning(f"Lane information is missing for run {run_folder_name}. Skipping this run.")
+                continue
+            else:
+                raise ValueError(f"Unexpected lane value: {lane}")
+
+        elif pd.notna(row["sequencer"]) and "novaseq6000" in row["sequencer"].lower():
+            index = run_df.index[run_df["Lane"] == "Full Run"][0]
+            run_columns = run_df.loc[index]
+
         else:
-            raise ValueError(f"Unexpected lane value: {lane}")
+            raise ValueError(f"Unexpected sequencer type: {row['sequencer']}")
 
         q30 = run_columns["Percent Q30"]
         error_rate = run_columns["Error Rate"]
 
-        if q30 >= 80 and error_rate <= 2:
+        if q30 >= 80 and error_rate <= 2 or q30 < 80 and error_rate == "NaN":
             status = "Yes"
         elif q30 < 80 and error_rate <= 2:
             status = "Percent Q30 < 80"
@@ -50,7 +76,14 @@ def filter_run_qc(df):
             "pass_run_qc": status
         })
 
-    return pd.DataFrame(pass_list)
+        df_pass = df.merge(pd.DataFrame(pass_list), 
+                           how="left", 
+                           left_on="seq_run_number", 
+                           right_on="seq_run_number")
+
+        df_pass.to_csv("outputs/filtered_run_metrics.csv", sep="\t", index=False)
+
+    return df_pass 
 
 
 if __name__=="__main__":

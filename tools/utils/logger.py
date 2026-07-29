@@ -15,12 +15,17 @@ The create_logger function is responsible for:
 """
 
 import logging
+from logging.handlers import RotatingFileHandler
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
     handlers=[
-        logging.FileHandler("pipeline.log"),
+        RotatingFileHandler(
+            "guardian_qc.log",
+            maxBytes=10 * 1024 * 1024,  # Rotate at 10 MB
+            backupCount=5               # Keep 5 old log files
+        ),
         logging.StreamHandler(),
     ],
 )
