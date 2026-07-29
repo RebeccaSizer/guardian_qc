@@ -1,6 +1,8 @@
 """ 
- This script processes and filters the run metrics so that only
- samples that pass run level metrics are kept"""
+This script processes and filters the run metrics so that only
+samples that pass run level metrics are kept
+"""
+
 import pandas as pd
 from pathlib import Path
 

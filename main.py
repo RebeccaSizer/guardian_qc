@@ -1,6 +1,6 @@
 from tools.utils.utils_cancer import get_run_file_paths, get_qc_summary_file_path, merge_run_and_qc_data, filter_df
 from tools.utils.logger import logger
-from tools.modules.run_qc import filter_run_qc
+from tools.modules.filter_by_run_qc import filter_run_qc
 
 
 
