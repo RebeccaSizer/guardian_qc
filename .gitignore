@@ -209,3 +209,10 @@ __marimo__/
 !docs/.gitkeep
 !tests/.gitkeep
 !tools/.gitkeep
+
+./temp_venv
+
+
+# Files to ignore for this project
+*.csv
+*.png
