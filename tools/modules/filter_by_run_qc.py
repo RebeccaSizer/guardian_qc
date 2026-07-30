@@ -31,7 +31,6 @@ def filter_run_qc(df):
     pass_list = []
 
     for _, row in df.drop_duplicates("seq_run_number").iterrows():
-        print(df.columns.tolist())
 
         run_folder_path = row["run_qual_filepath"]
         run_folder_name = Path(run_folder_path).name

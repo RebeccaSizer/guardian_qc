@@ -3,6 +3,7 @@ This module contains functions for preprocessing machine learning data.
 """
 
 import pandas as pd
+import numpy as np
 from tools.utils.logger import logging
 
 def sample_level_qc(df):
@@ -26,6 +27,9 @@ def sample_level_qc(df):
             sample_qc = extract_values_from_qc_summary(summary_qc_file_path)
 
             for sample in sample_qc:
+
+                sample["sequencer"] = row["sequencer"]
+                sample["cancer_type"] = row["cancer_type"]
                 summary_qc_metrics.append(sample)
 
     summary_qc_metrics_df = pd.DataFrame(summary_qc_metrics)
@@ -72,7 +76,7 @@ def extract_values_from_qc_summary(file_path):
                 "picard_pf_q30_bases": row["picard_pf_q30_bases"],
                 "picard_read_length": row["picard_read_length"],
                 "picard_at_dropout": row["picard_at_dropout"],
-                "picards_gc_dropout": row["picard_gc_dropout"],
+                "picard_gc_dropout": row["picard_gc_dropout"],
                 "picard_fold_enrichment": row["picard_fold_enrichment"],
                 "picard_fold80": row["picard_fold80"],
                 "picard_mean_target_coverage": row["picard_mean_target_coverage"],
@@ -93,9 +97,32 @@ def extract_values_from_qc_summary(file_path):
             
         return sample_qc
 
+def data_exploration(file_path):
+    """
+    Function to perform data exploration on the sequencing data.
+    This function is a placeholder for the actual implementation of data exploration.
+    
+    params:
+        file_path: str, path to the sequencing data file
+    """
+    df = pd.read_csv(file_path, sep = "\t")
+
+    # basic information about the dataframe
+    print(df.head()) # isplays thhe first 5 rows of the table
+    print(df.describe()) # gives metrics of the table such as mean, std, min, max for each column 
+    print(df.info()) # tells youi info about the data type in each column 
+    print(df.shape) # prints number of rows and columns 
+
+    # explore the data by splitting data by sequencer and type
+    print(df["sequencer"].value_counts()) # 9731 samples form NovaseqX, 4307 from Novaseq6000 
+    print(df["cancer_type"].value_counts()) # ST = 5676, hame_v2 = 4198. ST_V3 = 2697, Haem_v3 = 1467
+    print(df[['sequencer', 'cancer_type']].value_counts())
+
 
 if __name__ == "__main__":
-    samples = pd.read_csv("outputs/filtered_run_metrics.csv", sep = "\t")
+    #samples = pd.read_csv("outputs/filtered_run_metrics.csv", sep = "\t")
     logging.info("Starting sample-level QC processing...")
-    summary_qc_metrics_df = sample_level_qc(samples)
-    summary_qc_metrics_df.to_csv("outputs/summary_qc_metrics.csv", sep = "\t", index = False)
+    #summary_qc_metrics_df = sample_level_qc(samples)
+    #summary_qc_metrics_df.to_csv("outputs/summary_qc_metrics.csv", sep = "\t", index = False)
+
+    data = data_exploration("outputs/summary_qc_metrics.csv")

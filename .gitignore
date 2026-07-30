@@ -216,3 +216,4 @@ __marimo__/
 # Files to ignore for this project
 *.csv
 *.png
+*.log*
