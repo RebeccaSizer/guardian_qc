@@ -9,7 +9,6 @@ from pathlib import Path
 from tools.utils.logger import logging
 from tools.modules.inter_op import inter_op_qc
 
-
 def filter_run_qc(df):
     """
     Filter the dataframe to include only runs that pass run level QC metrics.
@@ -31,7 +30,8 @@ def filter_run_qc(df):
 
     pass_list = []
 
-    for _, row in df.iterrows():
+    for _, row in df.drop_duplicates("seq_run_number").iterrows():
+        print(df.columns.tolist())
 
         run_folder_path = row["run_qual_filepath"]
         run_folder_name = Path(run_folder_path).name
@@ -162,6 +162,18 @@ if __name__=="__main__":
         "haem_v2",
         "solid_tumour",
         "solid_tumour",
+    ],
+    "lane": [
+        [1],
+        [1],
+        [1],
+        [1],
+        [1],
+        [1, 2],
+        [1, 2],
+        [1, 2],
+        [1, 2],
+        [1, 2],
     ],
     "file_status": [
         "Yes",

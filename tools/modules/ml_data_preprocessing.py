@@ -1,11 +1,9 @@
 """ 
 This module contains functions for preprocessing machine learning data.
-
 """
+
 import pandas as pd
 from tools.utils.logger import logging
-
-samples = pd.read_csv("outputs/filtered_run_metrics.csv", sep = "\t")
 
 def sample_level_qc(df):
     """
@@ -31,6 +29,7 @@ def sample_level_qc(df):
                 summary_qc_metrics.append(sample)
 
     summary_qc_metrics_df = pd.DataFrame(summary_qc_metrics)
+
     return summary_qc_metrics_df
 
 
@@ -96,5 +95,7 @@ def extract_values_from_qc_summary(file_path):
 
 
 if __name__ == "__main__":
+    samples = pd.read_csv("outputs/filtered_run_metrics.csv", sep = "\t")
     logging.info("Starting sample-level QC processing...")
     summary_qc_metrics_df = sample_level_qc(samples)
+    summary_qc_metrics_df.to_csv("outputs/summary_qc_metrics.csv", sep = "\t", index = False)

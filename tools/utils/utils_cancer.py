@@ -276,7 +276,7 @@ def merge_run_and_qc_data(df_run_metrics, df_sample_metrics):
             
         """
 
-    df_merged = df_run_metrics.merge(df_sample_metrics,
+    df_merged = df_sample_metrics.merge(df_run_metrics,
                                      on = "seq_run_number",
                                      how = "left")
     
