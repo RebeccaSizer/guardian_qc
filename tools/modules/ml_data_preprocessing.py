@@ -5,6 +5,7 @@ This module contains functions for preprocessing machine learning data.
 import pandas as pd
 import numpy as np
 from tools.utils.logger import logging
+from sklearn.preprocessing import LabelEncoder
 
 def sample_level_qc(df):
     """
@@ -97,32 +98,24 @@ def extract_values_from_qc_summary(file_path):
             
         return sample_qc
 
-def data_exploration(file_path):
-    """
-    Function to perform data exploration on the sequencing data.
-    This function is a placeholder for the actual implementation of data exploration.
-    
-    params:
-        file_path: str, path to the sequencing data file
-    """
-    df = pd.read_csv(file_path, sep = "\t")
+def preprocess_qc_metrics(df):
 
-    # basic information about the dataframe
-    print(df.head()) # isplays thhe first 5 rows of the table
-    print(df.describe()) # gives metrics of the table such as mean, std, min, max for each column 
-    print(df.info()) # tells youi info about the data type in each column 
-    print(df.shape) # prints number of rows and columns 
+    logging.info(f"Loaded: {df.shape[0]} patients, {df.shape[1]} qc metrics")
+    logging.info(f"sequencer distribution:\n{df['sequencer'].value_counts()}")
+    logging.info(f"Missing values: {df.isnull().sum().sum()}")
 
-    # explore the data by splitting data by sequencer and type
-    print(df["sequencer"].value_counts()) # 9731 samples form NovaseqX, 4307 from Novaseq6000 
-    print(df["cancer_type"].value_counts()) # ST = 5676, hame_v2 = 4198. ST_V3 = 2697, Haem_v3 = 1467
-    print(df[['sequencer', 'cancer_type']].value_counts())
+    le = LabelEncoder()
+    df["fastqc_basic_status_encoded"] = le.fit_transform(df['fastqc_basic_status'])
+    fastqc_basic_status_values = le.classes_
+    logging.info(f"Classes: {fastqc_basic_status_values}")
+    logging.info(f"Column headers: {print(df)}")
 
+    return df
 
 if __name__ == "__main__":
     #samples = pd.read_csv("outputs/filtered_run_metrics.csv", sep = "\t")
     logging.info("Starting sample-level QC processing...")
     #summary_qc_metrics_df = sample_level_qc(samples)
     #summary_qc_metrics_df.to_csv("outputs/summary_qc_metrics.csv", sep = "\t", index = False)
-
-    data = data_exploration("outputs/summary_qc_metrics.csv")
+    df_qc_metrics = pd.read_csv("outputs/summary_qc_metrics.csv", sep = "\t")
+    preprocess_qc_metrics(df_qc_metrics)

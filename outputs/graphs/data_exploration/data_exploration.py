@@ -6,7 +6,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-from sklearn.preprocessing import RobustScaler
+from sklearn.preprocessing import RobustScaler, StandardScaler
 from sklearn.decomposition import PCA
 from scipy import stats
 from itertools import combinations
@@ -30,12 +30,12 @@ metric_cols = [
         "picards_gc_dropout",
         "picard_fold_enrichment",
         #"picard_fold80",
-        #"picard_mean_target_coverage",
-        #"picard_median_target_coverage",
-        #"picard_target_bases_20x",
-        #"picard_target_bases_30x",
-        #"picard_target_bases_50x",
-        #"picard_target_bases_100x",
+        "picard_mean_target_coverage",
+        "picard_median_target_coverage",
+        "picard_target_bases_20x",
+        "picard_target_bases_30x",
+        "picard_target_bases_50x",
+        "picard_target_bases_100x",
         "fastqc_duplication_rate",
         #"fastqc_basic_status",
         "fastp_duplication_rate",
@@ -123,7 +123,7 @@ def comparing_sequencer_cancer_type (df):
 
     # Scale
     X = df[metric_cols].fillna(df[metric_cols].median())
-    X_scaled = RobustScaler().fit_transform(X)
+    X_scaled = StandardScaler().fit_transform(X)
 
     # PCA
     pca = PCA(n_components=2)
@@ -138,6 +138,8 @@ def comparing_sequencer_cancer_type (df):
     )
     print(loadings["PC1"].abs().sort_values(ascending=False).head(10))
     print(loadings["PC2"].abs().sort_values(ascending=False).head(10))
+
+    print(pca.explained_variance_ratio_)
 
     var1 = pca.explained_variance_ratio_[0] * 100
     var2 = pca.explained_variance_ratio_[1] * 100
@@ -210,25 +212,26 @@ def test_group_differences(df, cols, group_col):
 if __name__ == "__main__":
     df_run_metrics = pd.read_csv("outputs/filtered_run_metrics.csv", sep="\t")
     df_qc_metrics = pd.read_csv("outputs/summary_qc_metrics.csv", sep = "\t")
+
     #pie_chart_run_metric_pass_rate(df_run_metrics)
-    bar_chart_sample_count_by_sequencer_and_cancer_type(df_qc_metrics)
-    comparing_sequencer_cancer_type(df_qc_metrics)
+    #bar_chart_sample_count_by_sequencer_and_cancer_type(df_qc_metrics)
+    #comparing_sequencer_cancer_type(df_qc_metrics)
     # Run for each grouping
-    results_seq    = test_group_differences(df_qc_metrics, metric_cols, "sequencer")
-    results_cancer = test_group_differences(df_qc_metrics, metric_cols, "cancer_type")
+    #results_seq    = test_group_differences(df_qc_metrics, metric_cols, "sequencer")
+    #results_cancer = test_group_differences(df_qc_metrics, metric_cols, "cancer_type")
 
-    df_qc_metrics_extra = df_qc_metrics.copy()
-    df_qc_metrics_extra["cancer_sequencer"] = (df_qc_metrics_extra["cancer_type"] + "_" + df_qc_metrics_extra["sequencer"])
-    results_both = test_group_differences(df_qc_metrics_extra, metric_cols, "cancer_sequencer")
+    #df_qc_metrics_extra = df_qc_metrics.copy()
+    #df_qc_metrics_extra["cancer_sequencer"] = (df_qc_metrics_extra["cancer_type"] + "_" + df_qc_metrics_extra["sequencer"])
+    #results_both = test_group_differences(df_qc_metrics_extra, metric_cols, "cancer_sequencer")
 
-    print("=== By sequencer ===")
-    print(results_seq[["metric","H_stat","p_value","significant"]].to_string())
+    #print("=== By sequencer ===")
+    #print(results_seq[["metric","H_stat","p_value","significant"]].to_string())
 
-    print("\n=== By cancer type ===")
-    print(results_cancer[["metric","H_stat","p_value","significant"]].to_string())
+    #print("\n=== By cancer type ===")
+    #print(results_cancer[["metric","H_stat","p_value","significant"]].to_string())
 
-    print("\n=== By sequencer and cancer type ===")
-    print(results_both[["metric","H_stat","p_value","significant"]].to_string())
+    #print("\n=== By sequencer and cancer type ===")
+    #print(results_both[["metric","H_stat","p_value","significant"]].to_string())
 
 
 

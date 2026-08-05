@@ -84,6 +84,8 @@ def filter_run_qc(df):
 
         df_pass.to_csv("outputs/filtered_run_metrics.csv", sep="\t", index=False)
 
+    print(df_pass["pass_run_qc"].value_counts())
+
     return df_pass 
 
 
