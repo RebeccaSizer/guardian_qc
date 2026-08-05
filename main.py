@@ -1,16 +1,26 @@
-from tools.modules.ml_data_preprocessing import sample_level_qc
-from tools.utils.utils_cancer import get_run_file_paths, get_qc_summary_file_path, merge_run_and_qc_data, filter_df
-from tools.utils.logger import logger
-from tools.modules.filter_by_run_qc import filter_run_qc
+import argparse
+import config
+
+from pipeline.ingest import get_run_file_paths, get_qc_summary_file_path, get_run_sample_file_paths, filter_df, filter_run_qc, sample_level_qc
+from utils.logger import logging
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--filter", action="store_true")
+args = parser.parse_args()
+
+df_sample = get_qc_summary_file_path()
+df_run = get_run_file_paths()
+
+df = get_run_sample_file_paths(df_run, df_sample)
+df.to_csv(config.QC_FILE_PATHS, sep="\t", index=False)
+
+if args.filter:
+    df = filter_df(df)
+    df = filter_run_qc(df)
+    df.to_csv(config.FILTERED_RUN_QC_DATA, sep="\t", index=False)
 
 
+summary_qc_metrics_df = sample_level_qc(df)
 
-output_run_folder = get_run_file_paths()
-output_qc_file = get_qc_summary_file_path()
-merged_output = merge_run_and_qc_data(output_run_folder, output_qc_file)
-filtered_df = filter_df(merged_output)
-filtered_output = filter_run_qc(filtered_df)
-summary_qc_metrics_df = sample_level_qc(filtered_output)
-
-summary_qc_metrics_df.to_csv("outputs/summary_qc_metrics.csv", sep = "\t", index = False)
+summary_qc_metrics_df.to_csv(config.SUMMARY_QC_METRICS, sep = "\t", index = False)
 print(summary_qc_metrics_df)

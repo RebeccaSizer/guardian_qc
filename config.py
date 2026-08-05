@@ -1,9 +1,17 @@
 import re
 from pathlib import Path
 
+
+##########################################################################
+# Set file path for log file and logging level                           #
+##########################################################################
+
+LOG_FILE_PATH = "outputs/logs/guardian_qc.log"
+LOG_LEVEL = "INFO"
+
 ##########################################################################
 # Set file paths and regex patterns for run folders and qc_summary files #
-# For utils_cancer.py                                                    #
+# For pipeline/ingest.py                                                 #
 ##########################################################################
 
 # Set all paths and regex patterns for run folders and qc_summary files
@@ -27,3 +35,13 @@ QC_SUMMARY_PATTERN_HAEM_V3 = re.compile(r"^[0-9]{7}\.RMHhaemV3\.qc_summary\.tsv$
 
 # sample sheet pattern to match SampleSheet.csv files
 SAMPLE_SHEET_PATTERN = re.compile(r"^SampleSheet\.csv$")
+
+# Specify output file locations for the QC summary files
+QC_FILE_PATHS = "data/raw/qc_summary_file_paths.csv"
+
+# Set output file location for files that pass run-level QC filtering and have all information for downstream analysis
+FILTERED_RUN_QC_DATA = "data/processed/filtered_by_run_metrics(1).csv"
+
+# Set file path to summary_qc_metrics.csv file
+SUMMARY_QC_METRICS = "data/processed/summary_qc_metrics(2).csv"
+

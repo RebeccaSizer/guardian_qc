@@ -38,13 +38,23 @@ merge_run_and_qc_data()
         - cancer_type
         - file_status
 
+filter_df()
+    filters the merged dataframe to include only rows where:
+    - file_status is 'Yes'
+    - lane is not None  
+
+filter_run_qc()
+    filters the dataframe to include only runs that pass run level QC metrics.
+
 date:	2026-02-03
 author:	Rebecca Sizer
 
 """
 # Import necessary modules
-from tools.utils.logger import logging
-from tools.utils import config
+from utils.logger import logging
+from qc.inter_op import inter_op_qc
+import config
+from pathlib import Path
 
 # Import pandas for data manipulation
 import pandas as pd
@@ -154,6 +164,49 @@ def get_run_file_paths():
         get_run_file_paths()
         
     """
+    def helper_get_lane(file_path):
+
+        """
+        Gather all file paths to sample sheets 
+        
+        params: 
+            None
+
+        output:
+            df
+                contains sequence run folder and File paths 
+        
+        Examples:
+            helper_get_lane()
+        """
+
+        try:
+
+            df_lane_info = pd.read_csv(file_path, skiprows=15, header=0)
+
+            if "Lane" not in df_lane_info.columns:
+                logging.warning(f"Lane column not found in sample sheet: {file_path}")
+                return None
+
+            elif df_lane_info["Lane"].isnull().all():
+                logging.warning(f"Lane column is empty in sample sheet: {file_path}")
+                return None
+
+            else:
+
+                lanes = sorted(df_lane_info["Lane"].unique())
+
+                if lanes == [1]:
+                    return [1]
+                elif lanes == [2]:
+                    return [2]
+                elif lanes == [1, 2]:
+                    return [1, 2]
+
+        except Exception as e:
+            logging.error(f"Error reading sample sheet {file_path}: {e}")
+            return None
+
     logging.info("Gathering run file paths from the runs directory.")
 
     runs = []
@@ -209,52 +262,8 @@ def get_run_file_paths():
     logging.info(f"{len(run_file_paths)} run_summary_file_paths loaded into a dataframe.")
     return run_file_paths
 
-############################################################
-def helper_get_lane(file_path):
 
-    """
-    Gather all file paths to sample sheets 
-    
-    params: 
-        None
-
-    output:
-        df
-            contains sequence run folder and File paths 
-    
-    Examples:
-        helper_get_lane()
-    """
-
-    try:
-
-        df_lane_info = pd.read_csv(file_path, skiprows=15, header=0)
-
-        if "Lane" not in df_lane_info.columns:
-            logging.warning(f"Lane column not found in sample sheet: {file_path}")
-            return None
-
-        elif df_lane_info["Lane"].isnull().all():
-            logging.warning(f"Lane column is empty in sample sheet: {file_path}")
-            return None
-
-        else:
-
-            lanes = sorted(df_lane_info["Lane"].unique())
-
-            if lanes == [1]:
-                return [1]
-            elif lanes == [2]:
-                return [2]
-            elif lanes == [1, 2]:
-                return [1, 2]
-
-    except Exception as e:
-        logging.error(f"Error reading sample sheet {file_path}: {e}")
-        return None
-
-
-def merge_run_and_qc_data(df_run_metrics, df_sample_metrics):
+def get_run_sample_file_paths(df_run_metrics, df_sample_metrics):
     """
     Merge the run_summary_file_paths and qc_summary_file_paths dataframes
     on the seq_run_number column and return a merged dataframe with the following columns:
@@ -299,7 +308,7 @@ def merge_run_and_qc_data(df_run_metrics, df_sample_metrics):
         check_both_files_present, 
         axis = 1)
     
-    df_merged.to_csv("outputs/file_paths.csv", sep='\t', header=True, index=False)
+    df_merged.to_csv(config.QC_FILE_PATHS, sep='\t', header=True, index=False)
 
     counts = (
         df_merged.groupby(["sequencer", "cancer_type"])
@@ -338,7 +347,176 @@ def filter_df(merged_dataframe):
 
     filtered_df = pd.DataFrame(pass_filter)
     logging.info(f"Filtered dataframe contains {len(filtered_df)} rows after applying QC and lane filters.")
+
     return filtered_df
+
+def filter_run_qc(df):
+    """
+    Filter the dataframe to include only runs that pass run level QC metrics.
+    The function checks the 'Percent Q30' and 'Error Rate' for each run and
+    determines if the run passes QC based on the following criteria:
+
+    - If 'Percent Q30' >= 80 and 'Error Rate' <= 2
+    - If 'Percent Q30' < 80 and 'Error Rate' is NaN
+    
+    If a run does not meet these criteria, it is marked as failing QC.
+    
+    params:
+        df (pd.DataFrame): DataFrame containing run metrics and QC information.
+    
+    output:
+        pd.DataFrame: Filtered DataFrame containing only runs that pass QC.
+        
+    """
+
+    pass_list = []
+
+    for _, row in df.drop_duplicates("seq_run_number").iterrows():
+
+        run_folder_path = row["run_qual_filepath"]
+        run_folder_name = Path(run_folder_path).name
+
+        run_df = inter_op_qc(run_folder_path)
+
+        if pd.notna(row["sequencer"]) and "novaseqx" in row["sequencer"].lower():
+            # Select the correct row of the InterOp summary
+            lane = row["lane"]
+
+            if lane == [1]:
+                run_columns = run_df.loc[0]
+            elif lane == [2]:
+                run_columns = run_df.loc[1]
+            elif lane == [1, 2]:
+                run_columns = run_df.loc[2]
+            elif lane is None:
+                logging.warning(f"Lane information is missing for run {run_folder_name}. Skipping this run.")
+                continue
+            else:
+                raise ValueError(f"Unexpected lane value: {lane}")
+
+        elif pd.notna(row["sequencer"]) and "novaseq6000" in row["sequencer"].lower():
+            index = run_df.index[run_df["Lane"] == "Full Run"][0]
+            run_columns = run_df.loc[index]
+
+        else:
+            raise ValueError(f"Unexpected sequencer type: {row['sequencer']}")
+
+        q30 = run_columns["Percent Q30"]
+        error_rate = run_columns["Error Rate"]
+
+        if q30 >= 80 and error_rate <= 2 or q30 < 80 and error_rate == "NaN":
+            status = "Yes"
+        elif q30 < 80 and error_rate <= 2:
+            status = "Percent Q30 < 80"
+        elif q30 >= 80 and error_rate > 2:
+            status = "Error rate > 2"
+        else:
+            status = "Percent Q30 < 80 AND Error rate > 2"
+
+        pass_list.append({
+            "seq_run_number": run_folder_name,
+            "pass_run_qc": status
+        })
+
+        df_pass = df.merge(pd.DataFrame(pass_list), 
+                           how="left", 
+                           left_on="seq_run_number", 
+                           right_on="seq_run_number")
+
+    logging.info(df_pass["pass_run_qc"].value_counts())
+
+    return df_pass 
+
+
+def sample_level_qc(df):
+    """
+    Function to gather sample-level QC metrics for each sample in the dataframe.
+    
+    params:
+        df: pd.DataFrame containing the merged run and qc summary file paths.
+    
+    output:
+        df: pd.DataFrame containing the summarized sample-level QC metrics for each sample.
+    """
+
+    # Helper function to extract values from the QC summary file
+    def extract_values_from_qc_summary(file_path):
+        """
+        Function to extract values from the QC summary file.
+        
+        params:
+            file_path: str, path to the QC summary file
+        
+        output:
+            qc_values: dict, containing the extracted values from the QC summary file.
+        """
+
+        sample_qc = []
+
+        try:
+
+            df = pd.read_csv(file_path, sep = "\t")
+
+            for _, row in df.iterrows():
+
+                logging.info(f"Extracting QC metrics for sample: {row['sample_name']}")
+
+                sample_qc.append({
+                    "sample_name": row["sample_name"],
+                    "bcftools_ts": row["bcftools_ts"],
+                    "bcftools_tv": row["bcftools_tv"],
+                    "bcftools_tstv": row["bcftools_tstv"],
+                    "bcftools_variants": row["bcftools_variants"],
+                    "bcftools_snvs": row["bcftools_SNVs"],
+                    "bcftools_indels": row["bcftools_indels"],
+                    "picard_mode_insert": row["picard_mode_insert"],
+                    "picard_mean_insert": row["picard_mean_insert"],
+                    "picard_median_insert": row["picard_median_insert"],
+                    "picard_mad_insert": row["picard_mad_insert"],
+                    "picard_total_reads": row["picard_total_reads"],
+                    "picard_pf_reads": row["picard_pf_reads"],
+                    "picard_pf_q30_bases": row["picard_pf_q30_bases"],
+                    "picard_read_length": row["picard_read_length"],
+                    "picard_at_dropout": row["picard_at_dropout"],
+                    "picard_gc_dropout": row["picard_gc_dropout"],
+                    "picard_fold_enrichment": row["picard_fold_enrichment"],
+                    "picard_fold80": row["picard_fold80"],
+                    "picard_mean_target_coverage": row["picard_mean_target_coverage"],
+                    "picard_median_target_coverage": row["picard_median_target_coverage"],
+                    "picard_target_bases_20x": row["picard_target_bases_20x"],
+                    "picard_target_bases_30x": row["picard_target_bases_30x"],
+                    "picard_target_bases_50x": row["picard_target_bases_50x"],
+                    "picard_target_bases_100x": row["picard_target_bases_100x"],
+                    "fastqc_duplication_rate": row["fastqc_duplication_rate"],
+                    "fastqc_basic_status": row["fastqc_basic_status"],
+                    "fastp_duplication_rate": row["fastp_duplication_rate"]
+                })
+
+            return sample_qc
+
+        except Exception as e:
+            logging.error(f"Error reading QC summary file {file_path}: {e}")
+                
+            return sample_qc
+    
+    summary_qc_metrics = []
+
+    for _, row in df.iterrows():
+
+        if row["pass_run_qc"] == "Yes":
+
+            summary_qc_file_path = row["qc_file_path"]
+            sample_qc = extract_values_from_qc_summary(summary_qc_file_path)
+
+            for sample in sample_qc:
+
+                sample["sequencer"] = row["sequencer"]
+                sample["cancer_type"] = row["cancer_type"]
+                summary_qc_metrics.append(sample)
+
+    summary_qc_metrics_df = pd.DataFrame(summary_qc_metrics)
+
+    return summary_qc_metrics_df
 
 
 #test functions in script

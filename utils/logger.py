@@ -15,14 +15,15 @@ The create_logger function is responsible for:
 """
 
 import logging
+import config
 from logging.handlers import RotatingFileHandler
 
 logging.basicConfig(
-    level=logging.INFO,
+    level=getattr(logging, config.LOG_LEVEL),
     format="%(asctime)s - %(levelname)s - %(message)s",
     handlers=[
         RotatingFileHandler(
-            "guardian_qc.log",
+            config.LOG_FILE_PATH,
             maxBytes=10 * 1024 * 1024,  # Rotate at 10 MB
             backupCount=5               # Keep 5 old log files
         ),

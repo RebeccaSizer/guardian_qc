@@ -6,7 +6,7 @@ import os.path
 from interop import py_interop_run_metrics, py_interop_summary
 import numpy as np
 import pandas as pd
-from tools.utils.logger import logger
+from utils.logger import logger
 
 # The following code was written by MW and edited by RS.
 def inter_op_qc(run_path):
