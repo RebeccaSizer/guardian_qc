@@ -1,6 +1,12 @@
-"""guardian_qc utils_cancer.py
+"""guardian_qc pipeline/ingest.py
 
-Util functions used by guardian_qc.
+Script for ingesting and processing QC summary files 
+and run summary files from the Guardian QC pipeline.
+Script produces a final dataframe containing sample-level
+QC metrics for each sample in the dataset that passes 
+run-level QC metrics filtering, and filters out any runs
+that have missing information (e.g. missing sample sheet,
+missing QC summary file, etc.). 
 
 Methods
 -------
@@ -22,9 +28,9 @@ get_run_file_paths()
         - run_qual_filepath
         - sample_sheet_path
 
-helper_get_lane()
-    helper function to get the lane information from the sample sheet
-    returns a list of lanes present in the sample sheet.
+    helper_get_lane()
+        helper function to get the lane information from the sample sheet
+        returns a list of lanes present in the sample sheet.
 
 merge_run_and_qc_data()
     merges the run_summary_file_paths and qc_summary_file_paths dataframes
@@ -37,6 +43,9 @@ merge_run_and_qc_data()
         - sequencer
         - cancer_type
         - file_status
+    
+    helper_check_both_files_present()
+        helper function to check if both run and qc summary files are present
 
 filter_df()
     filters the merged dataframe to include only rows where:
@@ -45,6 +54,12 @@ filter_df()
 
 filter_run_qc()
     filters the dataframe to include only runs that pass run level QC metrics.
+
+sample_level_qc()
+    gathers sample-level QC metrics for each sample in the dataframe.
+
+    helper_extract_values_from_qc_summary()
+        helper function to extract values from the QC summary file.
 
 date:	2026-02-03
 author:	Rebecca Sizer
@@ -71,7 +86,8 @@ def get_qc_summary_file_path():
 
     output:
         df
-            contains sequence run folder and File paths
+            contains sequence run folder and File paths for qc_summary files
+            Includes columns for seq_run_number, worklist, qc_file_path, sequencer, cancer_type
 
     """
 
@@ -263,7 +279,7 @@ def get_run_file_paths():
     return run_file_paths
 
 
-def get_run_sample_file_paths(df_run_metrics, df_sample_metrics):
+def merge_run_and_qc_data(df_run_metrics, df_sample_metrics):
     """
     Merge the run_summary_file_paths and qc_summary_file_paths dataframes
     on the seq_run_number column and return a merged dataframe with the following columns:
@@ -290,7 +306,7 @@ def get_run_sample_file_paths(df_run_metrics, df_sample_metrics):
                                      how = "left")
     
 
-    def check_both_files_present(row):
+    def helper_check_both_files_present(row):
 
         run = pd.notna(row["run_qual_filepath"])
         sample = pd.notna(row["qc_file_path"])
@@ -305,7 +321,7 @@ def get_run_sample_file_paths(df_run_metrics, df_sample_metrics):
             return "No QC data"
 
     df_merged["file_status"] = df_merged.apply(
-        check_both_files_present, 
+        helper_check_both_files_present, 
         axis = 1)
     
     df_merged.to_csv(config.QC_FILE_PATHS, sep='\t', header=True, index=False)
@@ -342,8 +358,11 @@ def filter_df(merged_dataframe):
 
     for _, row in merged_dataframe.iterrows():
 
-        if row["file_status"] == "Yes" and row["lane"] is not None:
+        if row["file_status"] == "Yes" and pd.notna(row["lane"]):
             pass_filter.append(row)
+
+        else:
+            continue
 
     filtered_df = pd.DataFrame(pass_filter)
     logging.info(f"Filtered dataframe contains {len(filtered_df)} rows after applying QC and lane filters.")
@@ -440,7 +459,7 @@ def sample_level_qc(df):
     """
 
     # Helper function to extract values from the QC summary file
-    def extract_values_from_qc_summary(file_path):
+    def helper_extract_values_from_qc_summary(file_path):
         """
         Function to extract values from the QC summary file.
         
@@ -506,7 +525,7 @@ def sample_level_qc(df):
         if row["pass_run_qc"] == "Yes":
 
             summary_qc_file_path = row["qc_file_path"]
-            sample_qc = extract_values_from_qc_summary(summary_qc_file_path)
+            sample_qc = helper_extract_values_from_qc_summary(summary_qc_file_path)
 
             for sample in sample_qc:
 
@@ -515,6 +534,12 @@ def sample_level_qc(df):
                 summary_qc_metrics.append(sample)
 
     summary_qc_metrics_df = pd.DataFrame(summary_qc_metrics)
+    length = len(summary_qc_metrics_df)
+
+    logging.info(f"Sample-level QC metrics gathered for {length} samples.")
+    logging.info(f"Columns in the sample-level QC metrics dataframe: {summary_qc_metrics_df.columns.tolist()}")
+    logging.info(f'Data successfully written to {config.SUMMARY_QC_METRICS}')
+    logging.info('Data successfully ingested and filtered')
 
     return summary_qc_metrics_df
 
