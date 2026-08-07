@@ -19,7 +19,10 @@ from pipeline.ingest import (get_qc_summary_file_path,
                             sample_level_qc)
 import pytest
 import pandas as pd
+from pathlib import Path
 
+Path("data/raw").mkdir(parents=True, exist_ok=True)
+Path("data/processed").mkdir(parents=True, exist_ok=True)
 
 ###############################
 # Test Ingest Functions       #  

@@ -74,6 +74,8 @@ from pathlib import Path
 # Import pandas for data manipulation
 import pandas as pd
 
+Path("data/raw").mkdir(parents=True, exist_ok=True)
+Path("data/processed").mkdir(parents=True, exist_ok=True)
 
 # This function gets the sample name from the file path 
 def get_qc_summary_file_path():
