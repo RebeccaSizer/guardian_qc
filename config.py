@@ -6,7 +6,7 @@ from pathlib import Path
 # Set file path for log file and logging level                           #
 ##########################################################################
 
-LOG_FILE_PATH = "outputs/logs/guardian_qc.log"
+LOG_FILE = "guardian_qc.log"
 LOG_LEVEL = "INFO"
 
 ##########################################################################
