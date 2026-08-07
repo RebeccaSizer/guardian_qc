@@ -158,7 +158,7 @@ def get_qc_summary_file_path():
 
         return qc_file_paths
 
-    except FileNotFoundError as e: 
+    except FileNotFoundError as e: # pragma: no cover
         # Log the error.
         logging.error(f"FileNotFoundError: {e}")
 
@@ -219,7 +219,7 @@ def get_run_file_paths():
                 elif lanes == [1, 2]:
                     return [1, 2]
 
-        except Exception as e:
+        except Exception as e: # pragma: no cover
             logging.error(f"Error reading sample sheet {file_path}: {e}")
             return None
 
@@ -513,7 +513,7 @@ def sample_level_qc(df):
 
             return sample_qc
 
-        except Exception as e:
+        except Exception as e: # pragma: no cover
             logging.error(f"Error reading QC summary file {file_path}: {e}")
                 
             return sample_qc

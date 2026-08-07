@@ -146,7 +146,7 @@ def test_get_run_file_paths(tmp_path, monkeypatch):
         "lane"
     ]
 
-# merge_run_and_qc_data
+# merge_run_and_qc_data 
 ###############################
 
 def test_merge_run_and_qc_data():
@@ -155,17 +155,23 @@ def test_merge_run_and_qc_data():
     the correct DataFrame structure and expected columns.
     """
     
-    df = pd.DataFrame({
+    df_run = pd.DataFrame({
+            "seq_run_number": [1, 2],
+            "run_qual_filepath": ["path1", "path2"],
+            "sample_sheet_path": ["sheet1", "sheet2"],
+            "lane": [[1], [2]]
+    })
+
+    df_qc = pd.DataFrame({
         "seq_run_number": [1, 2],
-        "run_qual_filepath": ["path1", "path2"],
-        "sample_sheet_path": ["sheet1", "sheet2"],
         "worklist": ["worklist1", "worklist2"],
         "qc_file_path": ["qc1", "qc2"],
         "sequencer": ["seq1", "seq2"],
-        "cancer_type": ["type1", "type2"],
-        "file_status": ["Yes", "No"]
+        "cancer_type": ["type1", "type2"]
     })
-    
+
+    df = merge_run_and_qc_data(df_run, df_qc)
+
     # Check if the returned object is a DataFrame
     assert isinstance(df, pd.DataFrame), "Expected a pandas DataFrame"
     
@@ -181,6 +187,15 @@ def test_merge_run_and_qc_data():
     
     for col in expected_columns:
         assert col in df.columns, f"Missing expected column: {col}"
+
+    assert len(df) == 2
+    assert df.loc[0, "seq_run_number"] == 1
+    assert df.loc[0, "run_qual_filepath"] == "path1"
+    assert df.loc[0, "worklist"] == "worklist1"
+    assert df.loc[0, "qc_file_path"] == "qc1"
+    assert df.loc[0, "sequencer"] == "seq1"
+    assert df.loc[0, "cancer_type"] == "type1"
+    assert df.loc[0, "file_status"] == "Yes"
 
 # filter_df
 ###############################
@@ -260,6 +275,37 @@ def test_filter_run_qc(mock_interop, q30, error_rate, expected):
 
     assert result.loc[0, "pass_run_qc"] == expected
 
+
+@patch("pipeline.ingest.inter_op_qc")
+def test_filter_run_qc_lane(mock_interop):
+    """
+    Test that this function correctly identifies the lane information
+    """
+
+    df = pd.DataFrame({
+        "seq_run_number": ["Run1", "Run2", "Run3"],
+        "run_qual_filepath": ["/tmp/Run1", "/tmp/Run2", "/tmp/Run3"],
+        "sequencer": ["novaseqx", "novaseqx", "novaseqx"],
+        "lane": [[1, 2], [1], [2]],
+    })
+
+    mock_interop.return_value = pd.DataFrame({
+        "Lane": [1, 2, "Full Run"],
+        "Percent Q30": [90, 80, 85],
+        "Error Rate": [1.0, 1.1, 1.05]
+    })
+
+
+    result = filter_run_qc(df)
+
+    assert result.loc[0, "lane"] == [1, 2]
+    assert result.loc[1, "lane"] == [1]
+    assert result.loc[2, "lane"] == [2]
+    assert result.loc[0, "pass_run_qc"] == "Yes"
+    assert result.loc[1, "pass_run_qc"] == "Yes"
+    assert result.loc[2, "pass_run_qc"] == "Yes"
+
+
 # test sample_level_qc
 ###############################
 
@@ -323,7 +369,6 @@ def test_sample_level_qc(tmp_path):
     })
 
     result = sample_level_qc(df)
-    print(result)
 
     # Check if the returned object is a DataFrame
     assert isinstance(result, pd.DataFrame), "Expected a pandas DataFrame"
@@ -362,3 +407,7 @@ def test_sample_level_qc(tmp_path):
     
     for col in expected_columns:
         assert col in result.columns, f"Missing expected column: {col}"
+
+    assert len(result) == 1
+    assert result.loc[0, "sample_name"] == "Sample001"
+    assert result.loc[0, "sequencer"] == "NovaSeq6000"
