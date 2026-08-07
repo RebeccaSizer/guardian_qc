@@ -3,7 +3,11 @@
 # Import packages needed for tool 
 import argparse
 import os.path
-from interop import py_interop_run_metrics, py_interop_summary
+try:
+    from interop import py_interop_run_metrics, py_interop_summary
+except ImportError:
+    py_interop_run_metrics = None
+    py_interop_summary = None
 import numpy as np
 import pandas as pd
 from utils.logger import logger

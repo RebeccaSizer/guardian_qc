@@ -16,6 +16,5 @@ dependencies:
   - pytest-cov=7.1.0
   - requests=2.34.2
   - scikit-learn=1.9.0
-  - interop=1.9.0
   
 
