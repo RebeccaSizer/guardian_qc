@@ -306,7 +306,7 @@ def merge_run_and_qc_data(df_run_metrics, df_sample_metrics):
     df_merged = df_sample_metrics.merge(df_run_metrics,
                                      on = "seq_run_number",
                                      how = "left")
-    
+
 
     def helper_check_both_files_present(row):
 
@@ -325,6 +325,8 @@ def merge_run_and_qc_data(df_run_metrics, df_sample_metrics):
     df_merged["file_status"] = df_merged.apply(
         helper_check_both_files_present, 
         axis = 1)
+
+    print(df_merged["file_status"].unique())
     
     df_merged.to_csv(config.QC_FILE_PATHS, sep='\t', header=True, index=False)
 
@@ -357,10 +359,24 @@ def filter_df(merged_dataframe):
     """
 
     pass_filter = []
+    print(merged_dataframe["file_status"].unique())
+    print(merged_dataframe)
 
     for _, row in merged_dataframe.iterrows():
 
-        if row["file_status"] == "Yes" and pd.notna(row["lane"]):
+        lane = row["lane"]
+
+        # Check that lane is present
+        if lane is None:
+            lane_present = False
+        elif isinstance(lane, float) and pd.isna(lane):
+            lane_present = False
+        elif isinstance(lane, list):
+            lane_present = len(lane) > 0
+        else:
+            lane_present = True
+
+        if row["file_status"] == "Yes" and lane_present:
             pass_filter.append(row)
 
         else:

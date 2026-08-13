@@ -228,18 +228,21 @@ def test_filter_df():
     assert all(filtered_df["lane"] == 1)
 
 
-def test_filter_df_filters_rows():
-
+def test_filter_df_filters_rows(tmp_path):
     df = pd.DataFrame({
         "file_status": ["Yes", "No", "Yes", "No"],
-        "lane": [1, 1, None, 2]
+        "lane": [[1], [1], None, [2]]
     })
 
-    result = filter_df(df)
+    # Create temporary input file
+    input_file = tmp_path / "test_input.csv"
+    df.to_csv(input_file, index=False)
+
+    result = filter_df(input_file)
 
     assert len(result) == 1
     assert result.iloc[0]["file_status"] == "Yes"
-    assert result.iloc[0]["lane"] == 1
+    assert result.iloc[0]["lane"] == [1]
 
 # filter_run_qc
 ###############################
