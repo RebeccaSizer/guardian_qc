@@ -3,6 +3,24 @@ import numpy as np
 from utils.logger import logging
 from sklearn.preprocessing import LabelEncoder
 
+"""
+Preprocessing the data includes:
+    Handling missing values
+    Removing duplicates
+    Correcting data types
+    Scaling/normalising numerical features
+    Encoding categorical variables
+    Removing irrelevant columns
+
+Also complete feature engineering 
+    Creating error_rate_per_1000_reads
+    Combining SNVs + indels into a total variant count
+    Creating ratios such as Ti/Tv
+    Extracting sequencer from a run identifier
+    Creating a feature such as coverage_pass_rate
+    Log-transforming a highly skewed QC metric
+"""
+
 def preprocess_qc_metrics(df):
 
     logging.info(f"Loaded: {df.shape[0]} patients, {df.shape[1]} qc metrics")
