@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "Guardian-QC"
 version = "0.0.1"
 license = { text = "MIT" } 
-authors = { name = "Rebecca Sizer", email = "rebecca.sizer@postgrad.manchester.ac.uk"},
+authors = { name = "Rebecca Sizer", email = "rebecca.sizer@postgrad.manchester.ac.uk"}
 
 description = "An AI tool for identifying QC outliers in NGS data"
 readme = "README.md"
@@ -29,7 +29,7 @@ dependencies = [
 test = ["pytest==8.4.2"]
 
 [project.urls]
-Homepage = "https://github.com/RebeccaSizer/guardian-qc
+Homepage = "https://github.com/RebeccaSizer/guardian-qc"
 Repository = "https://github.com/RebeccaSizer/guardian-qc"
 Issues = "https://github.com/RebeccaSizer/guardian-qc/issues"
 Actions = "https://github.com/RebeccaSizer/guardian-qc/actions"

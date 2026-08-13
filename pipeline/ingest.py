@@ -93,7 +93,7 @@ def get_qc_summary_file_path():
             if not run.is_dir():
                 continue
 
-            if config.RUN_PATTERN_NOVASEQX.match(run.name):
+            elif config.RUN_PATTERN_NOVASEQX.match(run.name):
                 sequencer = "novaseqx"
             elif config.RUN_PATTERN_NOVASEQ6000.match(run.name):
                 sequencer = "novaseq6000"
@@ -109,8 +109,9 @@ def get_qc_summary_file_path():
 
                     for file_path in worklist_dir.iterdir():
 
-                        if file_path.name[0:7] != worklist:
-                            continue  # Skip files that don't start with the worklist number
+                        if not file_path.name.startswith(worklist):
+                            continue
+                            # Skip files that don't start with the worklist number
 
                         for cancer_type, pattern in qc_patterns.items():
 
@@ -145,6 +146,7 @@ def get_qc_summary_file_path():
     except FileNotFoundError as e: 
         # Log the error.
         logging.error(f"FileNotFoundError: {e}")
+        return pd.DataFrame()
 
 
 
@@ -194,14 +196,8 @@ def get_run_file_paths():
 
             else:
 
-                lanes = sorted(df_lane_info["Lane"].unique())
-
-                if lanes == [1]:
-                    return [1]
-                elif lanes == [2]:
-                    return [2]
-                elif lanes == [1, 2]:
-                    return [1, 2]
+                lanes = sorted(df_lane_info["Lane"].dropna().astype(int).unique().tolist())
+                return lanes
 
         except Exception as e:
             logging.error(f"Error reading sample sheet {file_path}: {e}")
@@ -211,56 +207,62 @@ def get_run_file_paths():
 
     runs = []
 
-    for run in config.NOVASEQX_PATH.iterdir():
-        if run.is_dir() and config.RUN_PATTERN_NOVASEQX.match(run.name):
-            run_info = {
-                "seq_run_number": run.name,
-                "run_qual_filepath": str(run),
-                "sample_sheet_path": "No sample sheet found",
-                "lane": None
-            }
+    try:
+        for run in config.NOVASEQX_PATH.iterdir():
+            if run.is_dir() and config.RUN_PATTERN_NOVASEQX.match(run.name):
+                run_info = {
+                    "seq_run_number": run.name,
+                    "run_qual_filepath": str(run),
+                    "sample_sheet_path": "No sample sheet found",
+                    "lane": None
+                }
 
-            for file in run.iterdir():
+                for file in run.iterdir():
 
-                if file.is_file() and config.SAMPLE_SHEET_PATTERN.match(file.name):
+                    if file.is_file() and config.SAMPLE_SHEET_PATTERN.match(file.name):
 
-                    run_info["sample_sheet_path"] = str(file)
+                        run_info["sample_sheet_path"] = str(file)
 
-                    lane_info = helper_get_lane(file)
-                    run_info["lane"] = lane_info
-                    break  # assuming only one sample sheet per run
+                        lane_info = helper_get_lane(file)
+                        run_info["lane"] = lane_info
+                        break  # assuming only one sample sheet per run
 
-            runs.append(run_info)
-    
-    for run in config.NOVASEQ6000_PATH.iterdir():
+                runs.append(run_info)
         
-        if run.is_dir() and config.RUN_PATTERN_NOVASEQ6000.match(run.name):
-            run_info = {
-                "seq_run_number": run.name,
-                "run_qual_filepath": str(run),
-                "sample_sheet_path": "No sample sheet found",
-                "lane" : None
-            }
+        for run in config.NOVASEQ6000_PATH.iterdir():
+            
+            if run.is_dir() and config.RUN_PATTERN_NOVASEQ6000.match(run.name):
+                run_info = {
+                    "seq_run_number": run.name,
+                    "run_qual_filepath": str(run),
+                    "sample_sheet_path": "No sample sheet found",
+                    "lane" : None
+                }
 
-            for file in run.iterdir():
-                if file.is_file() and config.SAMPLE_SHEET_PATTERN.match(file.name):
-                    run_info["sample_sheet_path"] = str(file)
-                    run_info["lane"] = [8] # NovaSeq6000 has 8 lanes which do not need to be separated into individual lanes for this analysis
-                    break  # assuming only one sample sheet per run
+                for file in run.iterdir():
+                    if file.is_file() and config.SAMPLE_SHEET_PATTERN.match(file.name):
+                        run_info["sample_sheet_path"] = str(file)
+                        run_info["lane"] = [8] # NovaSeq6000 has 8 lanes which do not need to be separated into individual lanes for this analysis
+                        break  # assuming only one sample sheet per run
 
-            runs.append(run_info)
+                runs.append(run_info)
 
-    run_file_paths = pd.DataFrame(
-        runs,
-        columns=[
-            "seq_run_number",
-            "run_qual_filepath",
-            "sample_sheet_path",
-            "lane"
-        ]
-    )
-    logging.info(f"{len(run_file_paths)} run_summary_file_paths loaded into a dataframe.")
-    return run_file_paths
+        run_file_paths = pd.DataFrame(
+            runs,
+            columns=[
+                "seq_run_number",
+                "run_qual_filepath",
+                "sample_sheet_path",
+                "lane"
+            ]
+        )
+        logging.info(f"{len(run_file_paths)} run_summary_file_paths loaded into a dataframe.")
+        return run_file_paths
+
+    except FileNotFoundError as e: 
+        # Log the error.
+        logging.error(f"FileNotFoundError: {e}")
+        return pd.DataFrame()
 
 
 def get_run_sample_file_paths(df_run_metrics, df_sample_metrics):
@@ -285,7 +287,7 @@ def get_run_sample_file_paths(df_run_metrics, df_sample_metrics):
             
         """
 
-    df_merged = df_sample_metrics.merge(df_run_metrics,
+    df_merged = df_run_metrics.merge(df_sample_metrics,
                                      on = "seq_run_number",
                                      how = "left")
     
@@ -342,8 +344,23 @@ def filter_df(merged_dataframe):
 
     for _, row in merged_dataframe.iterrows():
 
-        if row["file_status"] == "Yes" and row["lane"] is not None:
+        lane = row["lane"]
+
+        # Check that lane is present
+        if lane is None:
+            lane_present = False
+        elif isinstance(lane, float) and pd.isna(lane):
+            lane_present = False
+        elif isinstance(lane, list):
+            lane_present = len(lane) > 0
+        else:
+            lane_present = True
+
+        if row["file_status"] == "Yes" and lane_present:
             pass_filter.append(row)
+
+        else:
+            continue
 
     filtered_df = pd.DataFrame(pass_filter)
     logging.info(f"Filtered dataframe contains {len(filtered_df)} rows after applying QC and lane filters.")
