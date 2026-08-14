@@ -2,7 +2,7 @@ import pandas as pd
 import config
 import numpy as np
 from utils.logger import logging
-from sklearn.preprocessing import LabelEncoder
+from sklearn import preprocessing
 
 """
 guardian_qc preprocessing.py
@@ -89,9 +89,6 @@ load_data()
 explore_qc_data()
     Perform initial exploration and summarisation of the QC dataset.
 
-check_missing_values()
-    Identify and summarise missing values across QC features.
-
 remove_duplicates()
     Identify and remove duplicate observations.
 
@@ -151,6 +148,19 @@ def load_data(file_path):
     return summary_qc_df
 
 def explore_qc_data(data_frame):
+    """
+    This function explores the data and reports:
+        - Number ofd Rows
+        - Number of Columns
+        - Number of samples split by sequencer and cancer type
+        - Number of duplicated rows
+        - Number of missing values
+    
+    params:
+        dataframe: containing qc summary metrics
+    
+    output: None
+    """
 
     logging.info("=================================== ")
     logging.info("Summary of the data: ")
@@ -178,18 +188,58 @@ def explore_qc_data(data_frame):
     logging.info("------------------------------------")
     logging.info(f"Number of zero values in each column: {(data_frame == 0).sum()}")
 
-    gc_zero = data_frame[data_frame["picard_gc_dropout"] == 0]
+def remove_duplicates(data_frame):
+    """
+    This function removes rows where the whole row is 
+    duplicated elsewhere in the dataframe
+    
+    params:
+        dataframe: containing qc summary metrics
+        
+    output
+        dataframe: with duplicate rows removed 
+    """
 
-    gc_zero_summary = (
-        gc_zero
-        .groupby(["sequencer", "cancer_type"])
-        .size()
-        .reset_index(name="zero_count")
-    )
+    logging.info(f"Removing any duplicate rows...") # Should I remove duplicate sample names - will this bias the model
+    original_len = len(data_frame)
+    deduplicated_df = data_frame.drop_duplicates()
+    final_len = len(deduplicated_df)
+    logging.info(f"Total rows removed due to duplication: {original_len - final_len}")
 
-    logging.info(f"GC Dropout by sequencer and cancer type : {gc_zero_summary}")
+    return deduplicated_df
+
+def correct_data_types(data_frame):
+    """
+    This function expands columns where qc metric values are of type string
+    and expands them to numeric values using LabelEncoder. 
+    This includes coluns for:
+        - Picards fold_80
+        - fast_qc_basic_status
+    
+    This does not include information for sample_name, Sequencer or cancer_type
+    as this information will be used to split the data into sub groups rather 
+    than been used to train the model """
+
+    str_columns = ["picard_fold80", "fastqc_basic_status"]
+
+    le = preprocessing.LabelEncoder()
+    data_frame_columns = data_frame.copy()
+
+    logging.info(f"Starting encoding of str values in the dataframe...")
+    for column in str_columns:
+        logging.info(f"Number of unique values in {column}: {data_frame[column].value_counts()}")
+        data_frame[f"{column}_encoded"] = le.fit_transform(data_frame[column])
+
+    logging.info(f"Encoding complete.\n"
+                 f"Previous number of columns: {data_frame_columns.shape[1]}\n"
+                 f"New value of columns: {data_frame.shape[1]}")
+
+    return data_frame
 
 
 if __name__ == "__main__":
     qc_summary_df = load_data(config.SUMMARY_QC_METRICS)
     explore_qc_data(qc_summary_df)
+    deduplicated_df = remove_duplicates(qc_summary_df)
+    encoded_df = correct_data_types(deduplicated_df)
+    print(encoded_df)
