@@ -1,6 +1,15 @@
-"""guardian_qc utils_cancer.py
+"""guardian_qc ingest.py
 
-Util functions used by guardian_qc.
+Functions used to ingest the data used by guardian_qc.
+
+This script pulls run, sample qc and sample sheet file paths into
+a single dataframe. It then filters the dataframe to remove data
+with missing values, and then uses the interop package to remove
+any runs that have failed run qc. The script then pulls all sample
+qc_metrics from all samples on runs that have passed these filters. 
+
+This script pulls data for solid tumour (ST) and Haem DNA runs from
+both the NovaSeq6000 and NovaSeqX.
 
 Methods
 -------
@@ -538,15 +547,18 @@ def sample_level_qc(df):
 
 #test functions in script
 if __name__ == "__main__":
-    output_run_folder = get_run_file_paths()
-    output_qc_file = get_qc_summary_file_path()
-    merged_output = merge_run_and_qc_data(output_run_folder, output_qc_file)
-    filtered_output = filter_df(merged_output)
+    df_sample = get_qc_summary_file_path()
+    df_run = get_run_file_paths()
 
-# exploration of merged_output dataframe
-# 827 runs do not have QC_Summary files
-# 46 runs do not have SampleSheet files
-# 627 rows pass filtering criteria (file_status == 'Yes' and lane is not None)
-    #print(filtered_output.isna().sum())
-    #print(f"Missing lane values: {filtered_output['lane'].isna().sum()}")
-    #print(f"Missing sample_qc_path values: {filtered_output['qc_file_path'].isna().sum()}")
+    df = get_run_sample_file_paths(df_run, df_sample)
+    df.to_csv(config.QC_FILE_PATHS, sep="\t", index=False)
+
+    # Filter the data
+    df = filter_df(df)
+    df = filter_run_qc(df)
+    df.to_csv(config.FILTERED_RUN_QC_DATA, sep="\t", index=False)
+
+    # Extract summary QC metrics
+    summary_qc_metrics_df = sample_level_qc(df)
+    summary_qc_metrics_df.to_csv(config.SUMMARY_QC_METRICS, sep = "\t", index = False)
+    print(summary_qc_metrics_df)
