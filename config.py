@@ -45,3 +45,5 @@ FILTERED_RUN_QC_DATA = "data/processed/filtered_by_run_metrics(1).csv"
 # Set file path to summary_qc_metrics.csv file
 SUMMARY_QC_METRICS = "data/processed/summary_qc_metrics(2).csv"
 
+# Set output directory for preprocessing files 
+PREPROCESSING_OUTDIR = 'models/preprocessing/'
