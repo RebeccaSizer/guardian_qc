@@ -428,6 +428,7 @@ def run_preprocessing(file_path: str, out_dir: str):
 
     X_train = X_train.drop(columns=to_drop)
     X_test = X_test.drop(columns=to_drop)
+    print(X_train)
 
     # Per-assay correlation plots — on scaled, filtered X_train
     
