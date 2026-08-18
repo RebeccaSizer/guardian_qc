@@ -1,10 +1,13 @@
 import pandas as pd
 import config
 import numpy as np
+import os 
 from utils.logger import logging
-from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from sklearn.preprocessing import OneHotEncoder, StandardScaler, RobustScaler
 from sklearn.impute import SimpleImputer
+from sklearn.feature_selection import VarianceThreshold
 from sklearn.model_selection import train_test_split
+from outputs.graphs.preprocessing.preprocessing_graphs import plot_correlation_matrix
 import joblib
 """
 guardian_qc preprocessing.py
@@ -245,6 +248,7 @@ def fix_data_types(data_frame):
     logging.info(f"picard_fold80: replacing {n_bad} '?' values with NaN")
     df = data_frame.copy()
     df['picard_fold80'] = pd.to_numeric(df["picard_fold80"].replace("?", np.nan))
+    df["assay"] = df["sequencer"] + "_" + df["cancer_type"]
     return df
 
 def split_test_train(data_frame): # First iteration is using all the data without separating out the sequencer or cancertype 
@@ -301,7 +305,8 @@ def apply_imputer(df: pd.DataFrame, imputer: SimpleImputer) -> pd.DataFrame:
     return imputed_df
 
 
-# Scale the data
+# Scale the data: Use standard scaler first, 
+# But it may be worth testing the robust scaler at some point.
 def fit_standard_scaler(train_df: pd.DataFrame):
 
     stdsc = StandardScaler()
@@ -315,12 +320,72 @@ def apply_standard_scaler(df: pd.DataFrame, scaler: StandardScaler) -> pd.DataFr
     scaled_df = pd.DataFrame(scaled, columns=df.columns, index=df.index)
     return scaled_df
 
+# Robust scaler for future use 
+def fit_robust_scaler(train_df: pd.DataFrame):
+
+    rbssc = RobustScaler()
+    rbssc.fit(train_df)
+    logging.info("Scaler fitted on training data.")
+    return rbssc
+    
+def apply_robust_scaler(df: pd.DataFrame, scaler: RobustScaler) -> pd.DataFrame:
+
+    scaled = scaler.transform(df[MODEL_FEATURES])
+    scaled_df = pd.DataFrame(scaled, columns=df.columns, index=df.index)
+    return scaled_df
+
+# Save the transformers
 def save_transformers(ohe, imputer, scaler, out_dir: str) -> None:
     joblib.dump(ohe,     f"{out_dir}/ohe.pkl")
     joblib.dump(imputer, f"{out_dir}/imputer.pkl")
     joblib.dump(scaler,  f"{out_dir}/scaler.pkl")
     logging.info(f"Transformers saved to {out_dir}/")
 
+# Feature selection
+# Identify columns that have very little variance
+def fit_variance_threshold(X_train: pd.DataFrame, threshold:float = 0.01) -> VarianceThreshold:
+    vt = VarianceThreshold(threshold=threshold)
+    vt.fit(X_train)
+    dropped = X_train.columns[~vt.get_support()].tolist()
+    logging.info(f"VarianceThreshold dropping {len(dropped)} features: {dropped}")
+    return vt
+
+def apply_variance_threshold(df: pd.DataFrame, vt: VarianceThreshold) -> pd.DataFrame:
+    df = pd.DataFrame(
+        vt.transform(df),
+        columns=df.columns[vt.get_support()],
+        index=df.index
+    )
+    return df
+
+# Find and Remove highly correlated pairs of data to prevent overweighting 
+def find_correlated_features(X_train, threshold=0.95):
+
+    corr_matrix = X_train.corr().abs()
+
+    upper = corr_matrix.where(
+        np.triu(
+            np.ones(corr_matrix.shape),
+            k=1
+        ).astype(bool)
+    )
+
+    correlated_pairs = []
+
+    for column in upper.columns:
+        for row in upper.index:
+            correlation = upper.loc[row, column]
+
+            if pd.notna(correlation) and correlation > threshold:
+                correlated_pairs.append({
+                    "feature_1": row,
+                    "feature_2": column,
+                    "correlation": correlation
+                })
+
+    return pd.DataFrame(correlated_pairs)
+
+# Run preprocessing 
 def run_preprocessing(file_path: str, out_dir: str):
 
     # Load the input
@@ -336,15 +401,27 @@ def run_preprocessing(file_path: str, out_dir: str):
     # Split the data. This needs to be done before fitting anything 
     train_df, test_df = split_test_train(df)
 
+    # Now drop metadata from both splits
+    meta_to_drop = METADATA_COLUMNS + ["assay"]
+    train_meta = train_df[["assay"]].copy()  # keep assay label for per-assay plots later
+    test_meta  = test_df[["assay"]].copy()
+
     # Encode the catergorical values 
     # Fit on train only
     ohe = fit_encoder(train_df)
     train_df = apply_encoder(train_df, ohe)
     test_df = apply_encoder(test_df, ohe)
 
-    # Drop the metadata for imputing and scaling 
-    X_train = train_df[MODEL_FEATURES]
-    X_test = test_df[MODEL_FEATURES]
+    # Build updated feature list post-OHE
+    ohe_cols = list(ohe.get_feature_names_out(CATERGORICAL_COLUMNS))
+    base_features = [f for f in MODEL_FEATURES
+                     if not f.startswith("fastqc_basic_status_")]
+    all_features = base_features + ohe_cols
+
+    # Drop the metadata
+    # Extract feature matrices — drop metadata
+    X_train = train_df[all_features]
+    X_test  = test_df[all_features]
 
     # Impute the data
     imputer = fit_imputer(X_train)
@@ -356,6 +433,46 @@ def run_preprocessing(file_path: str, out_dir: str):
     X_train = apply_standard_scaler(X_train, scaler)
     X_test = apply_standard_scaler(X_test, scaler)
 
+    # Variance threshold - this drops none 
+    # vt = fit_variance_threshold(X_train)
+    # X_train = apply_variance_threshold(X_train, vt)
+    # X_test = apply_variance_threshold(X_test, vt)
+
+    # Remove correlated features to prevent too much weight on certian features 
+    find_correlated_features(X_train)
+    logging.info('Analysing correlation between features')
+
+    to_drop = ['picard_total_reads', 
+               'picard_pf_reads',
+               'picard_mean_target_coverage', 
+               'picard_mean_insert', 
+               'picard_mad_insert',
+               'picard_median_target_coverage', 
+               'fastqc_basic_status_pass|pass', 
+               'fastqc_basic_status_pass|pass|pass|pass',  
+               'bcftools_variants',
+               'picard_target_bases_20x',
+               'picard_target_bases_30x',
+               'picard_target_bases_50x',]
+
+    logging.info(f'Dropping {len(to_drop)} columns due to high correlation: {to_drop}')
+
+    X_train = X_train.drop(columns=to_drop)
+    X_test = X_test.drop(columns=to_drop)
+
+    # Per-assay correlation plots — on scaled, filtered X_train
+    
+    #X_train_with_assay = X_train.copy()
+    #X_train_with_assay["assay"] = train_meta["assay"].values
+
+    #for assay in X_train_with_assay["assay"].unique():
+        #assay_features = X_train_with_assay[
+            #X_train_with_assay["assay"] == assay
+        #].drop(columns=["assay"])
+        #plot_correlation_matrix(assay_features, assay=assay, out_dir=config.PREPROCESSING_PLOT_DIR)
+    
+
+
     # Save the transformers
     save_transformers(ohe, imputer, scaler, out_dir)
 
@@ -366,5 +483,5 @@ def run_preprocessing(file_path: str, out_dir: str):
 if __name__ == "__main__":
     X_train, X_test = run_preprocessing(
         file_path=config.SUMMARY_QC_METRICS,
-        out_dir=config.PREPROCESSING_OUTDIR,
-    )
+        out_dir=os.path.join(config.PREPROCESSING_OUTDIR, 'feature_selection_correlation')
+        )

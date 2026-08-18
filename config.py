@@ -47,3 +47,5 @@ SUMMARY_QC_METRICS = "data/processed/summary_qc_metrics(2).csv"
 
 # Set output directory for preprocessing files 
 PREPROCESSING_OUTDIR = 'models/preprocessing/'
+
+PREPROCESSING_PLOT_DIR = 'outputs/graphs/preprocessing/'
