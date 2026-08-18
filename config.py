@@ -45,7 +45,43 @@ FILTERED_RUN_QC_DATA = "data/processed/filtered_by_run_metrics(1).csv"
 # Set file path to summary_qc_metrics.csv file
 SUMMARY_QC_METRICS = "data/processed/summary_qc_metrics(2).csv"
 
+# Set variables for preprocessing 
+# Define the model features 
+MODEL_FEATURES = [
+    "bcftools_ts",
+    "bcftools_tv",
+    "bcftools_tstv",
+    "bcftools_variants",
+    "bcftools_snvs",
+    "bcftools_indels",
+    "picard_mode_insert",
+    "picard_mean_insert",
+    "picard_median_insert",
+    "picard_mad_insert",
+    "picard_total_reads",
+    "picard_pf_reads",
+    "picard_pf_q30_bases",
+    "picard_read_length",
+    "picard_at_dropout",
+    "picard_gc_dropout",
+    "picard_fold_enrichment",
+    "picard_fold80",
+    "picard_mean_target_coverage",
+    "picard_median_target_coverage",
+    "picard_target_bases_20x",
+    "picard_target_bases_30x",
+    "picard_target_bases_50x",
+    "picard_target_bases_100x",
+    "fastqc_duplication_rate",
+    "fastp_duplication_rate"
+]
+
+CATERGORICAL_COLUMNS = ['fastqc_basic_status']
+METADATA_COLUMNS = ['sample_name', 'cancer_type', 'sequencer']
+STRATIFY_COLUMNS = ['cancer_type', 'sequencer']
+
 # Set output directory for preprocessing files 
 PREPROCESSING_OUTDIR = 'models/preprocessing/'
 
 PREPROCESSING_PLOT_DIR = 'outputs/graphs/preprocessing/'
+
