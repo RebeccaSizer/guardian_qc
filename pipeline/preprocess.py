@@ -9,6 +9,8 @@ from sklearn.feature_selection import VarianceThreshold
 from sklearn.model_selection import train_test_split
 from outputs.graphs.preprocessing.preprocessing_graphs import plot_correlation_matrix
 import joblib
+import config
+from pathlib import Path
 """
 guardian_qc preprocessing.py
 
@@ -145,42 +147,6 @@ Date: 2026-08-14
 Author: Rebecca Sizer
 """
 
-# Define the model features 
-MODEL_FEATURES = [
-    "bcftools_ts",
-    "bcftools_tv",
-    "bcftools_tstv",
-    "bcftools_variants",
-    "bcftools_snvs",
-    "bcftools_indels",
-    "picard_mode_insert",
-    "picard_mean_insert",
-    "picard_median_insert",
-    "picard_mad_insert",
-    "picard_total_reads",
-    "picard_pf_reads",
-    "picard_pf_q30_bases",
-    "picard_read_length",
-    "picard_at_dropout",
-    "picard_gc_dropout",
-    "picard_fold_enrichment",
-    "picard_fold80",
-    "picard_mean_target_coverage",
-    "picard_median_target_coverage",
-    "picard_target_bases_20x",
-    "picard_target_bases_30x",
-    "picard_target_bases_50x",
-    "picard_target_bases_100x",
-    "fastqc_duplication_rate",
-    "fastp_duplication_rate",
-    "fastqc_basic_status_pass|pass",
-    "fastqc_basic_status_pass|pass|pass|pass"
-]
-
-CATERGORICAL_COLUMNS = ['fastqc_basic_status']
-METADATA_COLUMNS = ['sample_name', 'cancer_type', 'sequencer']
-STRATIFY_COLUMNS = ['cancer_type', 'sequencer']
-
 # Load and audit the raw qc summary data
 def load_data(file_path):
 
@@ -210,7 +176,7 @@ def explore_qc_data(data_frame):
     logging.info(f"Number of Rows: {data_frame.shape[0]}")
     logging.info(f"Number of Columns: {data_frame.shape[1]}")
     logging.info(f"Columns to list:\n {data_frame.columns.tolist()}")
-    logging.info(f"\nSplit by sequencer and cancer type:\n {data_frame[STRATIFY_COLUMNS].value_counts()}")
+    logging.info(f"\nSplit by sequencer and cancer type:\n {data_frame[config.STRATIFY_COLUMNS].value_counts()}")
     logging.info(sep)
     logging.info("DATA QUALITY ")
     logging.info(sep)
@@ -257,7 +223,7 @@ def split_test_train(data_frame): # First iteration is using all the data withou
         data_frame,
         test_size = 0.2,
         random_state = 42,
-        stratify=data_frame[STRATIFY_COLUMNS] # Use cancer_type and sequencer to define training pop. These will NOT be given as features 
+        stratify=data_frame[config.STRATIFY_COLUMNS] # Use cancer_type and sequencer to define training pop. These will NOT be given as features 
     )
 
     logging.info(f"Train: {len(train_df)} rows | Test: {len(test_df)} rows")
@@ -267,22 +233,22 @@ def split_test_train(data_frame): # First iteration is using all the data withou
 def fit_encoder(train_df: pd.DataFrame) -> OneHotEncoder:
 
     ohe = OneHotEncoder(categories='auto', sparse_output=False, handle_unknown='ignore')
-    ohe.fit(train_df[CATERGORICAL_COLUMNS])
+    ohe.fit(train_df[config.CATERGORICAL_COLUMNS])
     logging.info(f"OHE fitted. Categories: {ohe.categories_}")
     return ohe
 
 def apply_encoder(df: pd.DataFrame, ohe: OneHotEncoder) -> pd.DataFrame:
 
-    encoded = ohe.transform(df[CATERGORICAL_COLUMNS])
+    encoded = ohe.transform(df[config.CATERGORICAL_COLUMNS])
 
     encoded_df = pd.DataFrame(
         encoded,
-        columns=ohe.get_feature_names_out(CATERGORICAL_COLUMNS),
+        columns=ohe.get_feature_names_out(config.CATERGORICAL_COLUMNS),
         index=df.index
     )
 
     data_frame = pd.concat(
-        [df.drop(columns=CATERGORICAL_COLUMNS), encoded_df],
+        [df.drop(columns=config.CATERGORICAL_COLUMNS), encoded_df],
         axis=1
     )
 
@@ -293,14 +259,14 @@ def apply_encoder(df: pd.DataFrame, ohe: OneHotEncoder) -> pd.DataFrame:
 def fit_imputer(train_df: pd.DataFrame) -> SimpleImputer:
 
     imputer = SimpleImputer(strategy = 'median')
-    imputer.fit(train_df[MODEL_FEATURES])
+    imputer.fit(train_df)
     logging.info('Imputer fitted on training data')
     return imputer
 
 def apply_imputer(df: pd.DataFrame, imputer: SimpleImputer) -> pd.DataFrame:
 
-    imputed = imputer.transform(df[MODEL_FEATURES])
-    imputed_df = pd.DataFrame(imputed, columns=MODEL_FEATURES, index=df.index)
+    imputed = imputer.transform(df)
+    imputed_df = pd.DataFrame(imputed, columns=df.columns, index=df.index)
 
     return imputed_df
 
@@ -316,7 +282,7 @@ def fit_standard_scaler(train_df: pd.DataFrame):
     
 def apply_standard_scaler(df: pd.DataFrame, scaler: StandardScaler) -> pd.DataFrame:
 
-    scaled = scaler.transform(df[MODEL_FEATURES])
+    scaled = scaler.transform(df)
     scaled_df = pd.DataFrame(scaled, columns=df.columns, index=df.index)
     return scaled_df
 
@@ -330,12 +296,15 @@ def fit_robust_scaler(train_df: pd.DataFrame):
     
 def apply_robust_scaler(df: pd.DataFrame, scaler: RobustScaler) -> pd.DataFrame:
 
-    scaled = scaler.transform(df[MODEL_FEATURES])
+    scaled = scaler.transform(df)
     scaled_df = pd.DataFrame(scaled, columns=df.columns, index=df.index)
     return scaled_df
 
 # Save the transformers
 def save_transformers(ohe, imputer, scaler, out_dir: str) -> None:
+
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
     joblib.dump(ohe,     f"{out_dir}/ohe.pkl")
     joblib.dump(imputer, f"{out_dir}/imputer.pkl")
     joblib.dump(scaler,  f"{out_dir}/scaler.pkl")
@@ -402,7 +371,7 @@ def run_preprocessing(file_path: str, out_dir: str):
     train_df, test_df = split_test_train(df)
 
     # Now drop metadata from both splits
-    meta_to_drop = METADATA_COLUMNS + ["assay"]
+    meta_to_drop = config.METADATA_COLUMNS + ["assay"]
     train_meta = train_df[["assay"]].copy()  # keep assay label for per-assay plots later
     test_meta  = test_df[["assay"]].copy()
 
@@ -413,8 +382,8 @@ def run_preprocessing(file_path: str, out_dir: str):
     test_df = apply_encoder(test_df, ohe)
 
     # Build updated feature list post-OHE
-    ohe_cols = list(ohe.get_feature_names_out(CATERGORICAL_COLUMNS))
-    base_features = [f for f in MODEL_FEATURES
+    ohe_cols = list(ohe.get_feature_names_out(config.CATERGORICAL_COLUMNS))
+    base_features = [f for f in config.MODEL_FEATURES
                      if not f.startswith("fastqc_basic_status_")]
     all_features = base_features + ohe_cols
 
@@ -471,8 +440,6 @@ def run_preprocessing(file_path: str, out_dir: str):
         #].drop(columns=["assay"])
         #plot_correlation_matrix(assay_features, assay=assay, out_dir=config.PREPROCESSING_PLOT_DIR)
     
-
-
     # Save the transformers
     save_transformers(ohe, imputer, scaler, out_dir)
 
