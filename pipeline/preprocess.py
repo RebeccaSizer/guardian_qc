@@ -7,14 +7,13 @@ from sklearn.preprocessing import OneHotEncoder, StandardScaler, RobustScaler
 from sklearn.impute import SimpleImputer
 from sklearn.feature_selection import VarianceThreshold
 from sklearn.model_selection import train_test_split
-from outputs.graphs.preprocessing.preprocessing_graphs import plot_correlation_matrix
+from outputs.graphs.preprocessing.preprocessing_graphs import plot_correlation_matrix,   plot_feature_distributions
 import joblib
-import config
 from pathlib import Path
 """
 guardian_qc preprocessing.py
 
-Preprocessing and feature engineering utilities for Guardian-QC.
+Preprocessing utilities for the Guardian-QC project.
 
 This module prepares QC summary data for downstream exploratory analysis,
 dimensionality reduction and unsupervised machine-learning models such as
@@ -22,133 +21,164 @@ Isolation Forest.
 
 The preprocessing workflow includes:
 
-1. Data exploration
-    - Inspect dataset dimensions and column types
-    - Summarise missing values
-    - Identify duplicate rows
-    - Examine distributions and summary statistics
-    - Assess feature variance and correlations
-    - Explore data by assay, sequencer and other relevant batch variables
+1. Data loading
+    - Load QC summary data from a tab-separated file.
+    - Return the data as a pandas DataFrame.
 
-2. Data cleaning and preprocessing
-    - Handle missing values
-    - Remove duplicate rows
-    - Correct data types
-    - Remove irrelevant or non-informative columns
-    - Encode categorical variables
-    - Remove low-variance features
-    - Scale/normalise numerical features
+2. Data cleaning
+    - Remove duplicate samples.
+    - Convert QC metrics to appropriate numerical data types.
+    - Replace invalid or missing values with NaN where appropriate.
+    - Create an assay identifier from sequencer and cancer type.
 
-3. Feature engineering
-    - Create error-rate-derived features
-    - Combine SNV and indel counts into total variant counts
-    - Create variant ratios such as Ti/Tv
-    - Extract useful information such as sequencer from run identifiers
-    - Create coverage-derived features such as coverage pass rate
-    - Apply transformations such as log transformation to highly skewed QC metrics
+3. Train/test splitting
+    - Split the dataset into training and test sets.
+    - Where appropriate, stratify the split using assay information to
+      maintain representation of different sequencing/cancer-type groups.
+    - The training set is used to fit preprocessing transformers to avoid
+      data leakage into the test set.
 
-4. Batch-effect assessment and correction
-    - Identify potential batch effects associated with sequencing runs,
-      sequencers, assays or other technical variables
-    - Calculate batch-aware statistics such as z-scores where appropriate
-    - Assess whether batch correction is required before downstream modelling
+4. Categorical encoding
+    - Encode categorical QC variables using OneHotEncoder.
+    - Handle previously unseen categories using ``handle_unknown="ignore"``.
+    - Convert encoded categorical variables into numerical feature columns.
 
-5. Final feature preparation
-    - Confirm that the final feature matrix contains valid numerical values
-    - Check for remaining missing or infinite values
-    - Verify feature distributions and correlations
-    - Return a model-ready feature matrix
+5. Missing-value imputation
+    - Fit a median-based SimpleImputer using the training data only.
+    - Apply the fitted imputer to both training and test data.
+    - This ensures that information from the test set is not used when
+      estimating missing-value replacement values.
+
+6. Feature scaling
+    - Fit a StandardScaler using the training data only.
+    - Apply the fitted scaler to both training and test data.
+    - Scaling is performed after categorical encoding and missing-value
+      imputation so that the final feature matrix contains numerical values.
+
+7. Feature selection
+    - Remove features with zero or very low variance using VarianceThreshold.
+    - Identify highly correlated features to support feature-selection
+      decisions and reduce redundant information.
+
+8. Transformer persistence
+    - Save fitted preprocessing transformers using joblib.
+    - Saved transformers include the one-hot encoder, imputer and scaler.
+    - These can be reused to ensure that future data is processed using
+      the same transformations as the training data.
 
 The intended workflow is:
 
     Raw QC data
         |
         v
-    Data exploration
+    Load data
         |
         v
-    Data cleaning
+    Remove duplicates
         |
         v
-    Feature engineering
+    Correct data types
         |
         v
-    Missing-value handling
+    Create assay information
         |
         v
-    Feature selection
+    Train/test split
         |
         v
-    Batch-effect assessment/correction
+    One-hot encoding
+        |
+        v
+    Missing-value imputation
         |
         v
     Feature scaling
         |
         v
-    Final model-ready data
+    Variance filtering
+        |
+        v
+    Correlation assessment
+        |
+        v
+    Model-ready feature matrix
 
 
 Functions
 ---------
-load_data()
-    Load the qc_summary csv file into a dataframe
 
-explore_qc_data()
-    Perform initial exploration and summarisation of the QC dataset.
+load_data()
+    Load QC summary data from a tab-separated file.
 
 remove_duplicates()
-    Identify and remove duplicate observations.
+    Remove duplicate observations based on sample information.
 
-correct_data_types()
-    Convert QC metrics to appropriate numerical or categorical data types.
+fix_data_types()
+    Convert QC metrics to appropriate numerical data types and create
+    assay identifiers from sequencing and cancer-type information.
 
-remove_irrelevant_features()
-    Remove columns that should not be used as model features, such as
-    identifiers, file paths or other metadata.
+split_test_train()
+    Split the input dataset into training and test sets, using stratification
+    where appropriate.
 
-engineer_qc_features()
-    Create derived QC features from existing metrics.
+fit_encoder()
+    Fit a OneHotEncoder using the training data.
 
-handle_missing_values()
-    Handle missing values using the selected imputation or filtering strategy.
+apply_encoder()
+    Apply a fitted OneHotEncoder and return the encoded feature matrix.
 
-remove_low_variance_features()
-    Remove features with little or no variation across samples.
+fit_imputer()
+    Fit a median-based SimpleImputer using training data.
 
-encode_categorical_features()
-    Encode categorical QC variables for downstream analysis.
+apply_imputer()
+    Apply a fitted imputer to a DataFrame.
 
-assess_feature_distributions()
-    Identify highly skewed features and determine whether transformations
-    are appropriate.
+fit_standard_scaler()
+    Fit a StandardScaler using training data.
 
-transform_skewed_features()
-    Apply transformations such as log transformation to skewed numerical
-    features.
+apply_standard_scaler()
+    Apply a fitted StandardScaler to a DataFrame.
 
-assess_feature_correlations()
-    Calculate feature correlations and identify highly correlated features.
+fit_variance_threshold()
+    Fit a VarianceThreshold feature selector.
 
-assess_batch_effects()
-    Investigate variation associated with sequencing runs, sequencers,
-    assays or other batch variables.
+apply_variance_threshold()
+    Apply a fitted variance threshold selector.
 
-calculate_batch_z_scores()
-    Calculate batch-aware z-scores for QC features where appropriate.
+find_correlated_features()
+    Identify pairs of highly correlated features above a specified
+    correlation threshold.
 
-scale_features()
-    Scale numerical features prior to PCA or machine-learning analysis.
+save_transformers()
+    Save fitted preprocessing transformers to disk using joblib.
 
-preprocess_qc_data()
-    Run the complete preprocessing and feature-engineering workflow and
-    return a model-ready feature matrix.
+run_preprocessing()
+    Run the complete preprocessing workflow and return the processed
+    training and test feature matrices.
 
-Date: 2026-08-14
+
+Data leakage prevention
+-----------------------
+Preprocessing transformers are fitted using the training data only.
+The fitted transformers are then applied to the test data.
+
+This prevents information from the test set influencing the preprocessing
+parameters used during model development.
+
+
+Date: 2026-08-18
 Author: Rebecca Sizer
 """
 
 # Load and audit the raw qc summary data
 def load_data(file_path):
+    """
+    Loads the raw summary qc file containing all of the qc metrics.
+    
+    params:
+        DataFrame containing qc metrics
+        
+    output:"""
 
     summary_qc_df = pd.read_csv(file_path, header=0, sep="\t")
     logging.info(f"Loaded {summary_qc_df.shape[0]} rows x {summary_qc_df.shape[1]} columns from {file_path}")
@@ -218,7 +248,15 @@ def fix_data_types(data_frame):
     return df
 
 def split_test_train(data_frame): # First iteration is using all the data without separating out the sequencer or cancertype 
+    """ 
+    This function splits the data into the test and training set.
+    params:
+        dataframe containing qc metrics
 
+    output:
+        Training dataframe
+        Testing dataframe
+    """
     train_df, test_df = train_test_split(
         data_frame,
         test_size = 0.2,
@@ -231,6 +269,16 @@ def split_test_train(data_frame): # First iteration is using all the data withou
 
 # Encode catergorical data 
 def fit_encoder(train_df: pd.DataFrame) -> OneHotEncoder:
+    """
+    This dunction fits the OneHotEncoder to the catergorical values
+    in the training dataframe
+    
+    params:
+        dataframe of qc values
+        
+    output:
+        OneHotEncoder fit to the training data
+    """
 
     ohe = OneHotEncoder(categories='auto', sparse_output=False, handle_unknown='ignore')
     ohe.fit(train_df[config.CATERGORICAL_COLUMNS])
@@ -238,7 +286,17 @@ def fit_encoder(train_df: pd.DataFrame) -> OneHotEncoder:
     return ohe
 
 def apply_encoder(df: pd.DataFrame, ohe: OneHotEncoder) -> pd.DataFrame:
-
+    """
+    This function fits the OneHotEncoder to the catergorical values
+    in the training dataframe
+    
+    params:
+        dataframe of qc values
+        OneHotEncoder trained on the training data
+        
+    output:
+        dataframe with catergorical values encoded
+    """
     encoded = ohe.transform(df[config.CATERGORICAL_COLUMNS])
 
     encoded_df = pd.DataFrame(
@@ -257,14 +315,33 @@ def apply_encoder(df: pd.DataFrame, ohe: OneHotEncoder) -> pd.DataFrame:
 # Impute missing values from data 
 
 def fit_imputer(train_df: pd.DataFrame) -> SimpleImputer:
-
+    """
+    This function fits the SimpleImputer to the numerical columns
+    in the training dataframe
+    
+    params:
+        dataframe of qc values
+        
+    output:
+        SimpleImputer trained on the training data
+    """
     imputer = SimpleImputer(strategy = 'median')
     imputer.fit(train_df)
     logging.info('Imputer fitted on training data')
     return imputer
 
 def apply_imputer(df: pd.DataFrame, imputer: SimpleImputer) -> pd.DataFrame:
-
+    """
+    This function fits the SimpleImputer to the numerical values
+    in the training dataframe
+    
+    params:
+        dataframe of qc values
+        SimpleImputer trained on the training data
+        
+    output:
+        dataframe with all missing values replaced by the median
+    """
     imputed = imputer.transform(df)
     imputed_df = pd.DataFrame(imputed, columns=df.columns, index=df.index)
 
@@ -274,6 +351,16 @@ def apply_imputer(df: pd.DataFrame, imputer: SimpleImputer) -> pd.DataFrame:
 # Scale the data: Use standard scaler first, 
 # But it may be worth testing the robust scaler at some point.
 def fit_standard_scaler(train_df: pd.DataFrame):
+    """
+    This function fits the StandardScaler to the numerical columns
+    in the training dataframe
+    
+    params:
+        dataframe of qc values
+        
+    output:
+        StandardScaler trained on the training data
+    """
 
     stdsc = StandardScaler()
     stdsc.fit(train_df)
@@ -282,6 +369,17 @@ def fit_standard_scaler(train_df: pd.DataFrame):
     
 def apply_standard_scaler(df: pd.DataFrame, scaler: StandardScaler) -> pd.DataFrame:
 
+    """
+    This function fits the StandardScaler to the numerical columns
+    in the training dataframe
+    
+    params:
+        dataframe of qc values
+        
+    output:
+        dataframe with scaled numerical values 
+    """
+
     scaled = scaler.transform(df)
     scaled_df = pd.DataFrame(scaled, columns=df.columns, index=df.index)
     return scaled_df
@@ -289,30 +387,74 @@ def apply_standard_scaler(df: pd.DataFrame, scaler: StandardScaler) -> pd.DataFr
 # Robust scaler for future use 
 def fit_robust_scaler(train_df: pd.DataFrame):
 
+    """
+    This function fits the RobustScaler to the numerical columns
+    in the training dataframe
+    
+    params:
+        dataframe of qc values
+        
+    output:
+        StandardScaler trained on the training data
+    """
     rbssc = RobustScaler()
     rbssc.fit(train_df)
     logging.info("Scaler fitted on training data.")
     return rbssc
     
 def apply_robust_scaler(df: pd.DataFrame, scaler: RobustScaler) -> pd.DataFrame:
-
+    """
+    This function fits the RobustScaler to the numerical columns
+    in the training dataframe
+    
+    params:
+        dataframe of qc values
+        
+    output:
+        dataframe with scaled numerical values 
+    """
     scaled = scaler.transform(df)
     scaled_df = pd.DataFrame(scaled, columns=df.columns, index=df.index)
     return scaled_df
 
 # Save the transformers
-def save_transformers(ohe, imputer, scaler, out_dir: str) -> None:
+def save_transformers(ohe, imputer, scaler, vt, to_drop_columns, out_dir: str) -> None:
+    """
+    This function saves the .pkl files so that this preprocessing can
+    be applied to future data.
+    
+    params:
+        ohe: Fitted OneHotEncoder
+        imputer: Fitted SimpleImputer
+        scaler: Fitted StandardScaler
+        out_dit: Output directory
+        
+    output:
+        ohe, imputer, and scaler .pkl files saved to the specified directory
+    """
 
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     joblib.dump(ohe,     f"{out_dir}/ohe.pkl")
     joblib.dump(imputer, f"{out_dir}/imputer.pkl")
     joblib.dump(scaler,  f"{out_dir}/scaler.pkl")
+    joblib.dump(vt,  f"{out_dir}/vt.pkl")
+    joblib.dump(to_drop_columns,  f"{out_dir}/dropped_columns.pkl")
     logging.info(f"Transformers saved to {out_dir}/")
 
 # Feature selection
 # Identify columns that have very little variance
 def fit_variance_threshold(X_train: pd.DataFrame, threshold:float = 0.01) -> VarianceThreshold:
+    """
+    This function sets the VarianceThreshold
+    
+    params:
+        dataframe of qc values
+        threshold: set to 0.01 unless specified otherwise 
+        
+    output:
+        VarianceThreshold fitted on the training data
+    """
     vt = VarianceThreshold(threshold=threshold)
     vt.fit(X_train)
     dropped = X_train.columns[~vt.get_support()].tolist()
@@ -320,6 +462,19 @@ def fit_variance_threshold(X_train: pd.DataFrame, threshold:float = 0.01) -> Var
     return vt
 
 def apply_variance_threshold(df: pd.DataFrame, vt: VarianceThreshold) -> pd.DataFrame:
+
+    """
+    This function fits the VarianceThreshold to the numerical columns
+    in the training dataframe
+    
+    params:
+        dataframe of qc values
+        vt: the VarianceThreshold trained on the training data
+        
+    output:
+        dataframe with variance failed returned 
+    """
+
     df = pd.DataFrame(
         vt.transform(df),
         columns=df.columns[vt.get_support()],
@@ -375,6 +530,7 @@ def run_preprocessing(file_path: str, out_dir: str):
     train_meta = train_df[["assay"]].copy()  # keep assay label for per-assay plots later
     test_meta  = test_df[["assay"]].copy()
 
+   #plot_feature_distributions(df, config.MODEL_FEATURES, assay_col='assay', out_dir=config.PREPROCESSING_PLOT_DIR)
     # Encode the catergorical values 
     # Fit on train only
     ohe = fit_encoder(train_df)
@@ -403,9 +559,9 @@ def run_preprocessing(file_path: str, out_dir: str):
     X_test = apply_standard_scaler(X_test, scaler)
 
     # Variance threshold - this drops none 
-    # vt = fit_variance_threshold(X_train)
-    # X_train = apply_variance_threshold(X_train, vt)
-    # X_test = apply_variance_threshold(X_test, vt)
+    vt = fit_variance_threshold(X_train)
+    X_train = apply_variance_threshold(X_train, vt)
+    X_test = apply_variance_threshold(X_test, vt)
 
     # Remove correlated features to prevent too much weight on certian features 
     find_correlated_features(X_train)
@@ -441,7 +597,7 @@ def run_preprocessing(file_path: str, out_dir: str):
         #plot_correlation_matrix(assay_features, assay=assay, out_dir=config.PREPROCESSING_PLOT_DIR)
     
     # Save the transformers
-    save_transformers(ohe, imputer, scaler, out_dir)
+    save_transformers(ohe, imputer, scaler, vt, to_drop, config.PREPROCESSING_OUTDIR)
 
     logging.info(f"Preprocessing complete. X_train: {X_train.shape} | X_test: {X_test.shape}")
     return X_train, X_test
