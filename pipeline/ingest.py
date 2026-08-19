@@ -539,6 +539,7 @@ def sample_level_qc(df):
                 sample["sequencer"] = row["sequencer"]
                 sample["cancer_type"] = row["cancer_type"]
                 sample['worklist'] = row['worklist']
+                sample['assay_type'] = row['sequencer'] + '_' + row['cancer_type']
                 summary_qc_metrics.append(sample)
 
     summary_qc_metrics_df = pd.DataFrame(summary_qc_metrics)

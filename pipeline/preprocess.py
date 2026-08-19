@@ -510,7 +510,7 @@ def find_correlated_features(X_train, threshold=0.95):
     return pd.DataFrame(correlated_pairs)
 
 # Run preprocessing 
-def run_preprocessing(file_path: str, out_dir: str):
+def run_preprocessing(file_path: str, out_dir: str, assay):
 
     # Load the input
     df = load_data(file_path)
@@ -525,12 +525,11 @@ def run_preprocessing(file_path: str, out_dir: str):
     # Split the data. This needs to be done before fitting anything 
     train_df, test_df = split_test_train(df)
 
-    # Now drop metadata from both splits
-    meta_to_drop = config.METADATA_COLUMNS + ["assay"]
-    train_meta = train_df[["assay"]].copy()  # keep assay label for per-assay plots later
-    test_meta  = test_df[["assay"]].copy()
+    # Isolate the metadata to save 
+    train_meta = train_df[["sample_name", "cancer_type", "sequencer", "assay"]].copy()  # keep assay label for per-assay plots later
+    test_meta  = test_df[["sample_name", "cancer_type", "sequencer", "assay"]].copy()
 
-   #plot_feature_distributions(df, config.MODEL_FEATURES, assay_col='assay', out_dir=config.PREPROCESSING_PLOT_DIR)
+    # plot_feature_distributions(df, config.MODEL_FEATURES, assay_col='assay', out_dir=config.PREPROCESSING_PLOT_DIR)
     # Encode the catergorical values 
     # Fit on train only
     ohe = fit_encoder(train_df)
@@ -600,11 +599,13 @@ def run_preprocessing(file_path: str, out_dir: str):
     save_transformers(ohe, imputer, scaler, vt, to_drop, config.PREPROCESSING_OUTDIR)
 
     logging.info(f"Preprocessing complete. X_train: {X_train.shape} | X_test: {X_test.shape}")
-    return X_train, X_test
+    return X_train, X_test, train_meta, test_meta
 
 
 if __name__ == "__main__":
-    X_train, X_test = run_preprocessing(
+    X_train, X_test, train_meta, test_meta = run_preprocessing(
         file_path=config.SUMMARY_QC_METRICS,
         out_dir=os.path.join(config.PREPROCESSING_OUTDIR, 'feature_selection_correlation')
         )
+
+    print(train_meta)
