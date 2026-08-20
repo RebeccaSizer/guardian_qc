@@ -9,7 +9,7 @@ including anomaly score distributions, per-feature explainability,
 and (where labelled data is available) precision-recall curves.
  
 Workflow:
-    Preprocessed X_train / X_test (per assay)
+    Preprocessed X_train / X_test (per assay: ST or haem)
         |
         v
     Fit Isolation Forest per assay
@@ -46,15 +46,6 @@ explain_outlier()
 explain_all_outliers()
     Apply explain_outlier to all flagged samples in a scored DataFrame.
  
-plot_score_distribution()
-    Plot the distribution of anomaly scores for an assay.
- 
-plot_flagging_rate()
-    Bar chart of flagging rates across assays.
- 
-evaluate_with_labels()
-    If labelled known-bad runs are available, compute AUPRC and plot PR curve.
- 
 run_model_pipeline()
     Orchestrator: fit, score, explain, evaluate, save for all assays.
  
@@ -72,12 +63,6 @@ from pipeline.preprocess import run_preprocessing
 from outputs.graphs.train.train_graphs import plot_score_distribution, plot_flagging_rates, plot_top_deviant_features, evaluate_with_labels
 from utils.logger import logging
 import config
- 
- 
-# Load X_train and X_test data
-X_train, X_test = run_preprocessing(file_path=config.SUMMARY_QC_METRICS,
-        out_dir=os.path.join(config.PREPROCESSING_OUTDIR, 'feature_selection_correlation')
-        )
  
 # Set constants that will be used in the script
 CONTAMINATION = 0.05
@@ -110,7 +95,7 @@ def fit_isolation_forest(X_train: pd.DataFrame, assay: str, contamination: float
                  f"contamination={contamination}")
    
     model = IsolationForest(
-        n_estimatorts=N_ESTIMATORS,
+        n_estimators=N_ESTIMATORS,
         contamination=contamination,
         random_state=RANDOM_STATE,
         n_jobs=-1 #run jobs in parallel
@@ -125,7 +110,7 @@ def fit_isolation_forest(X_train: pd.DataFrame, assay: str, contamination: float
 def save_model(model: IsolationForest, assay: str, outdir: str) -> None:
     """ Save a fitted IsolationForest to disk"""
  
-    os.makedir(outdir, exist_ok = True)
+    os.makedirs(outdir, exist_ok = True)
     path = os.path.join(outdir, f"{assay}_isolation_forest.pkl")
     joblib.dump(model, path)
  
@@ -172,7 +157,7 @@ def score_samples(model: IsolationForest, X: pd.DataFrame, assay: str, split: st
     X_scored['anomaly_score'] = model.decision_function(X) # Apply the model - this gives a metric of how far away the value is from the median?
     X_scored['anomaly_label'] = model.predict(X) # Apple the model to the data so it predicts if it is an outlier
 
-    n_flagged = (X_scored['anomaly_lable'] == -1).sum()
+    n_flagged = (X_scored['anomaly_label'] == -1).sum()
     n_total = len(X_scored)
     flag_rate = 100 * n_flagged / n_total
 
@@ -305,212 +290,39 @@ def log_model_summary(
     logging.info(sep)
  
  
-# ── 8. Orchestrator ───────────────────────────────────────────────────────────
- 
-def run_model_pipeline(
-    assay_data: dict,
-    model_dir: str,
-    plot_dir: str,
-    explanation_dir: str,
-    contamination_map: dict = None,
-    labelled_data: dict = None,
-) -> dict:
-    """
-    Fit, score, explain, and evaluate Isolation Forest models for all assays.
- 
-    Parameters
-    ----------
-    assay_data : dict
-        Keys: assay name (str).
-        Values: dict with keys:
-            'X_train' : pd.DataFrame — preprocessed training features
-            'X_test'  : pd.DataFrame — preprocessed test features
-        e.g. {
-            "NovaSeq_lung": {"X_train": df_train, "X_test": df_test},
-            ...
-        }
- 
-    model_dir : str
-        Directory to save fitted models.
- 
-    plot_dir : str
-        Directory to save evaluation plots.
- 
-    explanation_dir : str
-        Directory to save outlier explanation CSVs.
- 
-    contamination_map : dict, optional
-        Per-assay contamination rates.
-        e.g. {"NovaSeq_lung": 0.03, "MiSeq_colorectal": 0.07}
-        Falls back to DEFAULT_CONTAMINATION if assay not in map.
- 
-    labelled_data : dict, optional
-        Per-assay ground truth labels for PR curve evaluation.
-        Keys: assay name. Values: pd.Series (1=bad, 0=good), indexed
-        to match X_test rows.
-        Only provide if you have manually verified known-bad runs.
- 
-    Returns
-    -------
-    dict
-        Per-assay summary: flagging rates, AUPRC if available.
-    """
-    if contamination_map is None:
-        contamination_map = {}
-    if labelled_data is None:
-        labelled_data = {}
- 
-    summary       = {}
-    flagging_summary = {}
- 
-    for assay, data in assay_data.items():
-        logging.info(f"\n{'='*55}")
-        logging.info(f"Processing assay: {assay}")
-        logging.info(f"{'='*55}")
- 
-        X_train = data["X_train"]
-        X_test  = data["X_test"]
-        contamination = contamination_map.get(assay, CONTAMINATION)
- 
-        # Fit
-        model = fit_isolation_forest(X_train, assay, contamination)
-        save_model(model, assay, model_dir)
- 
-        # Score
-        X_train_scored = score_samples(model, X_train, assay, split="train")
-        X_test_scored  = score_samples(model, X_test,  assay, split="test")
- 
-        n_flagged_train = (X_train_scored["anomaly_label"] == -1).sum()
-        n_flagged_test  = (X_test_scored["anomaly_label"]  == -1).sum()
- 
-        flagging_summary[assay] = {
-            "n_total":   len(X_test_scored),
-            "n_flagged": n_flagged_test,
-        }
- 
-        # Explain flagged test samples
-        explanations = explain_all_outliers(
-            X_test_scored, X_train, assay, explanation_dir
+def run_model_train(X_train, X_test, assay, contamination, out_dir):
+
+    model = fit_isolation_forest(X_train, assay, contamination)
+    save_model(model, assay, out_dir)
+
+    X_train_scored = score_samples(model, X_train, assay, 'train')
+    X_test_scored = score_samples(model, X_test, assay, 'test')
+
+    X_train_scored_explained = explain_all_outliers(X_train_scored, X_train, assay, out_dir, TOP_N_FEATURES)
+    X_test_scored_explained = explain_all_outliers(X_test_scored, X_test, assay, out_dir, TOP_N_FEATURES)
+
+    print(X_train_scored_explained)
+
+    # For model summary 
+    n_train = len(X_train)
+    n_test = len(X_test)
+    n_flagged_train = (X_train_scored['anomaly_label'] == -1).sum()
+    n_flagged_test = (X_test_scored['anomaly_label'] == -1).sum()
+
+    log_model_summary(
+        assay,
+        n_train,
+        n_test,
+        n_flagged_train,
+        n_flagged_test,
+        contamination
         )
- 
-        # Plots
-        plot_score_distribution(X_train_scored, X_test_scored, assay, plot_dir)
-        if not explanations.empty:
-            plot_top_deviant_features(explanations, assay, plot_dir)
- 
-        # Evaluate with labels if provided
-        auprc = None
-        if assay in labelled_data:
-            eval_result = evaluate_with_labels(
-                X_test_scored, labelled_data[assay], assay, plot_dir
-            )
-            auprc = eval_result["auprc"]
- 
-        # Log summary
-        log_model_summary(
-            assay=assay,
-            n_train=len(X_train),
-            n_test=len(X_test),
-            n_flagged_train=n_flagged_train,
-            n_flagged_test=n_flagged_test,
-            contamination=contamination,
-            auprc=auprc,
-        )
- 
-        summary[assay] = {
-            "n_train":        len(X_train),
-            "n_test":         len(X_test),
-            "n_flagged_train": n_flagged_train,
-            "n_flagged_test":  n_flagged_test,
-            "flag_rate_test":  100 * n_flagged_test / len(X_test),
-            "contamination":   contamination,
-            "auprc":           auprc,
-        }
- 
-    # Cross-assay flagging rate plot
-    plot_flagging_rates(flagging_summary, plot_dir)
- 
-    return summary
- 
  
 # ── Entry point ───────────────────────────────────────────────────────────────
  
 if __name__ == "__main__":
-    print(X_test)
-    assay_data = {
-        "novaseqx_solid_tumour": {
-            "X_train": X_train_novaseqx_solid_tumour,
-            "X_test": X_test_novaseqx_solid_tumour,
-        },
+    X_train_haem, X_test_haem, train_meta_haem, test_meta_haem = run_preprocessing(config.SUMMARY_QC_METRICS, 'haem', out_dir=None)
+    X_train_ST, X_test_ST, train_meta_ST, test_meta_ST = run_preprocessing(config.SUMMARY_QC_METRICS, 'ST', out_dir=None)
 
-        "novaseqx_haem": {
-            "X_train": X_train_novaseqx_haem,
-            "X_test": X_test_novaseqx_haem,
-        },
-
-        "novaseq6000_solid_tumour": {
-            "X_train": X_train_novaseq6000_solid_tumour,
-            "X_test": X_test_novaseq6000_solid_tumour,
-        },
-
-        "novaseq6000_haem": {
-            "X_train": X_train_novaseq6000_haem,
-            "X_test": X_test_novaseq6000_haem,
-        },
-    }
-
-    # ------------------------------------------------------------------
-    # Isolation Forest contamination
-    # ------------------------------------------------------------------
-    #
-    # contamination represents the expected proportion of anomalous
-    # samples in each assay.
-    #
-    # These are example values only. Ideally, determine these from
-    # historical QC failure rates or labelled data.
-
-    contamination_map = {
-        "novaseqx_solid_tumour": 0.05,
-        "novaseqx_haem": 0.05,
-        "novaseq6000_solid_tumour": 0.05,
-        "novaseq6000_haem": 0.05,
-    }
-
-    # ------------------------------------------------------------------
-    # Optional labelled data
-    # ------------------------------------------------------------------
-    #
-    # If you have manually reviewed QC runs, you can provide their
-    # labels here to evaluate model performance.
-    #
-    # Example:
-    #
-    # labelled_data = {
-    #     "novaseqx_solid_tumour": pd.Series({
-    #         10: 1,   # known bad run
-    #         25: 0,   # known good run
-    #         31: 1,
-    #     })
-    # }
-
-    summary = run_model_pipeline(
-        assay_data=assay_data,
-        model_dir=config.MODEL_DIR,
-        plot_dir=config.MODEL_PLOT_DIR,
-        explanation_dir=config.EXPLANATION_DIR,
-        contamination_map=contamination_map,
-        # labelled_data=labelled_data,
-    )
-
-    # ------------------------------------------------------------------
-    # Print summary
-    # ------------------------------------------------------------------
-
-    logging.info("Model pipeline complete.")
-
-    summary_df = pd.DataFrame(summary).T
-
-    logging.info(
-        "\n%s",
-        summary_df.to_string()
-    )
+    run_model_train(X_train_haem, X_test_haem, 'haem', 0.05, os.path.join('models/trained', 'haem'))
+    run_model_train(X_train_ST, X_test_ST, 'ST', 0.20, os.path.join('models/trained', 'ST'))

@@ -10,6 +10,7 @@ from sklearn.model_selection import train_test_split
 from outputs.graphs.preprocessing.preprocessing_graphs import plot_correlation_matrix,   plot_feature_distributions
 import joblib
 from pathlib import Path
+import argparse
 """
 guardian_qc preprocessing.py
 
@@ -244,7 +245,6 @@ def fix_data_types(data_frame):
     logging.info(f"picard_fold80: replacing {n_bad} '?' values with NaN")
     df = data_frame.copy()
     df['picard_fold80'] = pd.to_numeric(df["picard_fold80"].replace("?", np.nan))
-    df["assay"] = df["sequencer"] + "_" + df["cancer_type"]
     return df
 
 def split_test_train(data_frame): # First iteration is using all the data without separating out the sequencer or cancertype 
@@ -509,8 +509,67 @@ def find_correlated_features(X_train, threshold=0.95):
 
     return pd.DataFrame(correlated_pairs)
 
+def separate_data(df: pd.DataFrame, assay_type: str) -> pd.DataFrame:
+    """
+    Filter the QC dataset to the current production assay.
+
+    ST:
+        NovaSeq X + solid_tumour_v3
+
+    Haem:
+        NovaSeq X + haem_v3
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Cleaned QC dataframe.
+
+    assay_type : str
+        Either "ST" or "haem".
+
+    Returns
+    -------
+    pd.DataFrame
+        Dataframe containing only the requested assay.
+    """
+
+    assay_type = assay_type.lower()
+
+    if assay_type == "st":
+        filtered_df = df[
+            (df["sequencer"].str.lower() == "novaseqx") &
+            (df["cancer_type"].str.lower() == "solid_tumour_v3")
+        ].copy()
+
+    elif assay_type == "haem":
+        filtered_df = df[
+            (df["sequencer"].str.lower() == "novaseqx") &
+            (df["cancer_type"].str.lower() == "haem_v3")
+        ].copy()
+
+    else:
+        raise ValueError(
+            f"Unknown assay_type '{assay_type}'. "
+            "Expected 'ST' or 'haem'."
+        )
+
+    logging.info(
+        f"Filtering for {assay_type.upper()} assay: "
+        f"{len(filtered_df)} samples retained"
+    )
+
+    logging.info(
+        f"Sequencers:\n{filtered_df['sequencer'].value_counts().to_string()}"
+    )
+
+    logging.info(
+        f"Cancer/pipeline versions:\n"
+        f"{filtered_df['cancer_type'].value_counts().to_string()}"
+    )
+    return filtered_df
+
 # Run preprocessing 
-def run_preprocessing(file_path: str, out_dir: str, assay):
+def run_preprocessing(file_path: str, assay_type: str, out_dir: None):
 
     # Load the input
     df = load_data(file_path)
@@ -522,14 +581,29 @@ def run_preprocessing(file_path: str, out_dir: str, assay):
     df = remove_duplicates(df)
     df = fix_data_types(df)
 
+    df.to_csv('data/processed/cleaned_summary_qc_metrics(3).csv', sep='\t')
+
+    # Filter to the requested production assay
+    df = separate_data(
+        df,
+        assay_type=assay_type
+    )
+
+    df.to_csv(os.path.join('data/processed/separated_data'+ '_' + assay_type + '(4).csv'), sep='\t')
+
+    if len(df) < 10:
+        raise ValueError(
+            f"Only {len(df)} samples available for {assay_type}. "
+            "Not enough data for preprocessing."
+        )
+
     # Split the data. This needs to be done before fitting anything 
     train_df, test_df = split_test_train(df)
 
     # Isolate the metadata to save 
-    train_meta = train_df[["sample_name", "cancer_type", "sequencer", "assay"]].copy()  # keep assay label for per-assay plots later
-    test_meta  = test_df[["sample_name", "cancer_type", "sequencer", "assay"]].copy()
+    train_meta = train_df[["sample_name", "cancer_type", "sequencer", "assay_type"]].copy()  # keep assay label for per-assay plots later
+    test_meta  = test_df[["sample_name", "cancer_type", "sequencer", "assay_type"]].copy()
 
-    # plot_feature_distributions(df, config.MODEL_FEATURES, assay_col='assay', out_dir=config.PREPROCESSING_PLOT_DIR)
     # Encode the catergorical values 
     # Fit on train only
     ohe = fit_encoder(train_df)
@@ -566,46 +640,77 @@ def run_preprocessing(file_path: str, out_dir: str, assay):
     find_correlated_features(X_train)
     logging.info('Analysing correlation between features')
 
-    to_drop = ['picard_total_reads', 
-               'picard_pf_reads',
-               'picard_mean_target_coverage', 
-               'picard_mean_insert', 
-               'picard_mad_insert',
-               'picard_median_target_coverage', 
-               'fastqc_basic_status_pass|pass', 
-               'fastqc_basic_status_pass|pass|pass|pass',  
-               'bcftools_variants',
-               'picard_target_bases_20x',
-               'picard_target_bases_30x',
-               'picard_target_bases_50x',]
+    columns_to_drop = [
+        'picard_total_reads',
+        'picard_pf_reads',
+        'picard_mean_target_coverage',
+        'picard_mean_insert',
+        'picard_mad_insert',
+        'picard_median_target_coverage',
+        'fastqc_basic_status_pass|pass',
+        'fastqc_basic_status_pass|pass|pass|pass',
+        'bcftools_variants',
+        'picard_target_bases_20x',
+        'picard_target_bases_30x',
+        'picard_target_bases_50x',
+    ]
+
+    # Only drop columns that are actually present
+    to_drop = [
+        column for column in columns_to_drop
+        if column in X_train.columns
+    ]
+
+    logging.info(
+        f"Dropping {len(to_drop)} columns due to high correlation: {to_drop}"
+    )
 
     logging.info(f'Dropping {len(to_drop)} columns due to high correlation: {to_drop}')
 
     X_train = X_train.drop(columns=to_drop)
     X_test = X_test.drop(columns=to_drop)
 
-    # Per-assay correlation plots — on scaled, filtered X_train
-    
-    #X_train_with_assay = X_train.copy()
-    #X_train_with_assay["assay"] = train_meta["assay"].values
-
-    #for assay in X_train_with_assay["assay"].unique():
-        #assay_features = X_train_with_assay[
-            #X_train_with_assay["assay"] == assay
-        #].drop(columns=["assay"])
-        #plot_correlation_matrix(assay_features, assay=assay, out_dir=config.PREPROCESSING_PLOT_DIR)
-    
-    # Save the transformers
-    save_transformers(ohe, imputer, scaler, vt, to_drop, config.PREPROCESSING_OUTDIR)
+    if out_dir is not None:
+        save_transformers(ohe, imputer, scaler, vt, to_drop, out_dir)
 
     logging.info(f"Preprocessing complete. X_train: {X_train.shape} | X_test: {X_test.shape}")
     return X_train, X_test, train_meta, test_meta
 
 
 if __name__ == "__main__":
+
+    parser = argparse.ArgumentParser(
+        description="Preprocess Guardian-QC data for a specific assay."
+    )
+
+    parser.add_argument(
+        "--assay",
+        choices=["ST", "haem"],
+        required=True,
+        help="Assay to preprocess: ST or haem"
+    )
+
+    args = parser.parse_args()
+
+    output_dir = os.path.join(
+        config.PREPROCESSING_OUTDIR,
+        args.assay
+    )
+
     X_train, X_test, train_meta, test_meta = run_preprocessing(
         file_path=config.SUMMARY_QC_METRICS,
-        out_dir=os.path.join(config.PREPROCESSING_OUTDIR, 'feature_selection_correlation')
-        )
+        assay_type=args.assay,
+        out_dir=output_dir
+    )
 
-    print(train_meta)
+    logging.info(
+        f"{args.assay} preprocessing complete."
+    )
+
+    print(
+        f"Training samples: {len(X_train)}"
+    )
+
+    print(
+        f"Testing samples: {len(X_test)}"
+    )

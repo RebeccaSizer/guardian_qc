@@ -1,36 +1,24 @@
 """
 guardian_qc assess_grouping.py
  
-Assesses whether QC metrics differ significantly between sequencers
-and pipeline versions within each cancer type group (ST and Haem).
+Assesses whether QC metrics differ significantly between:
+    1. Pipeline versions (solid_tumour vs solid_tumour_v3,
+                          haem_v2 vs haem_v3)
+    2. Sequencers (within each cancer type group)
  
-If metrics are statistically equivalent across sequencers/pipeline versions
-within a cancer type, the data can be safely pooled and only split by
-cancer type (ST vs Haem), simplifying the per-assay model structure.
+This determines whether data can be pooled across pipeline versions
+and/or sequencers before training per-assay Isolation Forest models,
+or whether separate models are needed for each combination.
  
-Approach
---------
-For each QC metric and each cancer type group:
- 
-1. Statistical tests
-   - Two or more groups: Kruskal-Wallis (non-parametric, no normality assumption)
-   - Pairwise follow-up: Mann-Whitney U with Bonferroni correction
-   - Effect size: Cohen's d and rank-biserial correlation
- 
-2. Visual inspection
-   - Box plots per metric per group, faceted by sequencer/pipeline version
-   - Overlaid KDE plots to compare distributions
- 
-3. Summary table
-   - One row per metric per cancer type
-   - Reports p-value, effect size, and a recommendation (pool / do not pool)
+cancer_type column contains: solid_tumour, solid_tumour_v3, haem_v2, haem_v3
+sequencer column contains:   two sequencer identifiers
  
 Outputs
 -------
-- assess_grouping_summary.csv   : full statistical summary
-- boxplots/                     : one plot per metric
-- kde_plots/                    : one plot per metric
-- assess_grouping.log           : full log
+    assess_grouping_summary.csv     Full statistical results
+    heatmaps/                       Effect size heatmaps per comparison
+    boxplots/                       Box plots per metric per comparison
+    kde_plots/                      KDE plots per metric per comparison
  
 Date: 2026-08-19
 Author: Rebecca Sizer
@@ -38,429 +26,460 @@ Author: Rebecca Sizer
  
 import os
 import logging
+import warnings
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-import matplotlib.ticker as mtick
 import seaborn as sns
- 
 from itertools import combinations
-from scipy import stats
-from scipy.stats import mannwhitneyu, kruskal
+from scipy.stats import kruskal, mannwhitneyu
  
-import config
-from utils.logger import logging
-from pipeline.preprocess import load_data, fix_data_types
+warnings.filterwarnings("ignore", category=UserWarning)
  
-# ── Constants ─────────────────────────────────────────────────────────────────
+# ── Column names ──────────────────────────────────────────────────────────────
  
-# Significance threshold after Bonferroni correction
-ALPHA = 0.05
+CANCER_TYPE_COL = "cancer_type"
+SEQUENCER_COL   = "sequencer"
  
-# Effect size threshold below which a difference is considered negligible
-# Uses rank-biserial correlation (0 = no effect, 1 = complete separation)
-NEGLIGIBLE_EFFECT_SIZE = 0.1
+# Map cancer_type values to their parent group and version
+# Adjust these if your values differ
+PIPELINE_GROUPS = {
+    "solid_tumour":    {"parent": "solid_tumour", "version": "v1"},
+    "solid_tumour_v3": {"parent": "solid_tumour", "version": "v3"},
+    "haem_v2":         {"parent": "haem",         "version": "v2"},
+    "haem_v3":         {"parent": "haem",         "version": "v3"},
+}
  
-# The grouping variables to test
-CANCER_TYPE_COL  = "cancer_type"
-SEQUENCER_COL    = "sequencer"
-PIPELINE_COL     = "pipeline_version"   # rename to match your actual column name
+# ── QC metrics to test ────────────────────────────────────────────────────────
  
-# Which column to split assays on — adjust if you don't have pipeline_version
-GROUP_COLS = [CANCER_TYPE_COL]            # add PIPELINE_COL if you have it
+NUMERIC_FEATURES = [
+    "bcftools_ts",
+    "bcftools_tv",
+    "bcftools_tstv",
+    "bcftools_variants",
+    "bcftools_snvs",
+    "bcftools_indels",
+    "picard_mode_insert",
+    "picard_mean_insert",
+    "picard_median_insert",
+    "picard_mad_insert",
+    "picard_total_reads",
+    "picard_pf_reads",
+    "picard_pf_q30_bases",
+    "picard_read_length",
+    "picard_at_dropout",
+    "picard_gc_dropout",
+    "picard_fold_enrichment",
+    "picard_fold80",
+    "picard_mean_target_coverage",
+    "picard_median_target_coverage",
+    "picard_target_bases_20x",
+    "picard_target_bases_30x",
+    "picard_target_bases_50x",
+    "picard_target_bases_100x",
+    "fastqc_duplication_rate",
+    "fastp_duplication_rate",
+]
+ 
+# ── Thresholds ────────────────────────────────────────────────────────────────
+ 
+ALPHA                   = 0.05    # significance threshold
+NEGLIGIBLE_EFFECT       = 0.1     # rank-biserial r below this → negligible
+SMALL_EFFECT            = 0.3     # r below this → small effect
  
  
-# ── Statistical tests ─────────────────────────────────────────────────────────
+# ── Statistics ────────────────────────────────────────────────────────────────
  
-def rank_biserial_correlation(u_stat: float, n1: int, n2: int) -> float:
-    """
-    Compute rank-biserial correlation as effect size for Mann-Whitney U.
-    Ranges from -1 to 1. Values near 0 = negligible effect.
-    """
+def rank_biserial_r(u_stat: float, n1: int, n2: int) -> float:
+    """Effect size for Mann-Whitney U. Range: -1 to 1."""
     return 1 - (2 * u_stat) / (n1 * n2)
  
  
-def cohens_d(group1: pd.Series, group2: pd.Series) -> float:
-    """Cohen's d effect size between two groups."""
-    mean_diff = group1.mean() - group2.mean()
-    pooled_std = np.sqrt(
-        ((len(group1) - 1) * group1.std()**2 +
-         (len(group2) - 1) * group2.std()**2) /
-        (len(group1) + len(group2) - 2)
-    )
-    return mean_diff / (pooled_std + 1e-9)
+def interpret_effect(r: float) -> str:
+    r = abs(r)
+    if r < NEGLIGIBLE_EFFECT:
+        return "negligible"
+    elif r < SMALL_EFFECT:
+        return "small"
+    else:
+        return "meaningful"
  
  
-def test_metric_across_groups(
-    df: pd.DataFrame,
+def recommend(significant: bool, effect: str) -> str:
+    if not significant:
+        return "pool"
+    if effect == "negligible":
+        return "pool (sig but negligible effect)"
+    if effect == "small":
+        return "review"
+    return "do not pool"
+ 
+ 
+def test_two_groups(
+    group_a: pd.Series,
+    group_b: pd.Series,
+    label_a: str,
+    label_b: str,
     metric: str,
-    group_col: str,
+    n_comparisons: int = 1,
 ) -> dict:
     """
-    Test whether a QC metric differs significantly across groups
-    (e.g. sequencers or pipeline versions).
- 
-    Uses Kruskal-Wallis for overall test, then pairwise Mann-Whitney U
-    with Bonferroni correction if more than two groups.
- 
-    Returns a dict with test results.
+    Mann-Whitney U test between two groups with Bonferroni correction.
+    Returns a result dict.
     """
-    groups      = df[group_col].dropna().unique()
-    group_data  = [df.loc[df[group_col] == g, metric].dropna() for g in groups]
+    a = group_a.dropna()
+    b = group_b.dropna()
  
-    # Drop groups with fewer than 5 samples
-    valid = [(g, d) for g, d in zip(groups, group_data) if len(d) >= 5]
- 
-    if len(valid) < 2:
+    if len(a) < 5 or len(b) < 5:
         return {
-            "metric":           metric,
-            "group_col":        group_col,
-            "n_groups":         len(valid),
-            "kruskal_p":        np.nan,
-            "significant":      False,
-            "max_effect_size":  np.nan,
-            "recommendation":   "insufficient data",
-            "notes":            f"Only {len(valid)} group(s) with n>=5",
+            "metric": metric, "group_a": label_a, "group_b": label_b,
+            "n_a": len(a), "n_b": len(b),
+            "u_stat": np.nan, "raw_p": np.nan, "corrected_p": np.nan,
+            "effect_r": np.nan, "effect_interp": "insufficient data",
+            "significant": False, "recommendation": "insufficient data",
         }
  
-    groups, group_data = zip(*valid)
- 
-    # Overall Kruskal-Wallis
-    if len(groups) == 2:
-        kw_stat, kw_p = kruskal(*group_data)
-    else:
-        kw_stat, kw_p = kruskal(*group_data)
- 
-    # Pairwise Mann-Whitney U with Bonferroni correction
-    pairs        = list(combinations(range(len(groups)), 2))
-    n_pairs      = len(pairs)
-    pairwise_results = []
- 
-    for i, j in pairs:
-        g1, g2 = group_data[i], group_data[j]
-        u_stat, mw_p = mannwhitneyu(g1, g2, alternative="two-sided")
-        corrected_p  = min(mw_p * n_pairs, 1.0)   # Bonferroni
-        rbc          = abs(rank_biserial_correlation(u_stat, len(g1), len(g2)))
-        d            = abs(cohens_d(g1, g2))
- 
-        pairwise_results.append({
-            "group_a":      groups[i],
-            "group_b":      groups[j],
-            "mw_p":         mw_p,
-            "corrected_p":  corrected_p,
-            "rbc":          rbc,
-            "cohens_d":     d,
-            "significant":  corrected_p < ALPHA,
-        })
- 
-    pairwise_df  = pd.DataFrame(pairwise_results)
-    max_effect   = pairwise_df["rbc"].max()
-    any_sig      = pairwise_df["significant"].any()
- 
-    # Recommendation
-    if not any_sig:
-        recommendation = "pool"
-    elif any_sig and max_effect < NEGLIGIBLE_EFFECT_SIZE:
-        recommendation = "pool (significant but negligible effect)"
-    else:
-        recommendation = "do not pool"
+    u_stat, raw_p       = mannwhitneyu(a, b, alternative="two-sided")
+    corrected_p         = min(raw_p * n_comparisons, 1.0)
+    r                   = rank_biserial_r(u_stat, len(a), len(b))
+    effect_interp       = interpret_effect(r)
+    significant         = corrected_p < ALPHA
+    rec                 = recommend(significant, effect_interp)
  
     return {
-        "metric":          metric,
-        "group_col":       group_col,
-        "n_groups":        len(groups),
-        "group_sizes":     {g: len(d) for g, d in zip(groups, group_data)},
-        "kruskal_stat":    round(kw_stat, 4),
-        "kruskal_p":       round(kw_p, 6),
-        "significant":     any_sig,
-        "max_effect_size": round(max_effect, 4),
-        "recommendation":  recommendation,
-        "pairwise":        pairwise_df,
+        "metric":       metric,
+        "group_a":      label_a,
+        "group_b":      label_b,
+        "n_a":          len(a),
+        "n_b":          len(b),
+        "u_stat":       round(u_stat, 2),
+        "raw_p":        round(raw_p, 6),
+        "corrected_p":  round(corrected_p, 6),
+        "effect_r":     round(abs(r), 4),
+        "effect_interp": effect_interp,
+        "significant":  significant,
+        "recommendation": rec,
     }
  
  
 # ── Plots ─────────────────────────────────────────────────────────────────────
  
-def plot_metric_boxplot(
+def plot_boxplot(
     df: pd.DataFrame,
     metric: str,
     group_col: str,
-    cancer_type: str,
-    out_dir: str,
+    title: str,
+    out_path: str,
 ) -> None:
-    """Box plot of a metric split by group_col, for one cancer type."""
-    fig, ax = plt.subplots(figsize=(8, 5))
+    groups     = sorted(df[group_col].dropna().unique())
+    group_data = [df.loc[df[group_col] == g, metric].dropna() for g in groups]
+    colours    = sns.color_palette("Set2", len(groups))
  
-    groups  = sorted(df[group_col].dropna().unique())
-    colours = sns.color_palette("Set2", len(groups))
- 
-    data_to_plot = [df.loc[df[group_col] == g, metric].dropna() for g in groups]
- 
-    bp = ax.boxplot(
-        data_to_plot,
-        patch_artist=True,
-        notch=False,
-        medianprops=dict(color="black", linewidth=2),
-    )
-    for patch, colour in zip(bp["boxes"], colours):
-        patch.set_facecolor(colour)
+    fig, ax = plt.subplots(figsize=(max(6, len(groups) * 2), 5))
+    bp = ax.boxplot(group_data, patch_artist=True,
+                    medianprops=dict(color="black", linewidth=2))
+    for patch, c in zip(bp["boxes"], colours):
+        patch.set_facecolor(c)
         patch.set_alpha(0.7)
  
     ax.set_xticklabels(
-        [f"{g}\n(n={len(df[df[group_col]==g][metric].dropna())})" for g in groups]
+        [f"{g}\n(n={len(df[df[group_col]==g][metric].dropna())})"
+         for g in groups],
+        rotation=15, ha="right"
     )
     ax.set_ylabel(metric)
-    ax.set_title(f"{metric} by {group_col} — {cancer_type}")
+    ax.set_title(title)
     plt.tight_layout()
- 
-    os.makedirs(out_dir, exist_ok=True)
-    plt.savefig(
-        os.path.join(out_dir, f"{cancer_type}_{metric}_{group_col}_boxplot.png"),
-        dpi=120, bbox_inches="tight"
-    )
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    plt.savefig(out_path, dpi=120, bbox_inches="tight")
     plt.close()
  
  
-def plot_metric_kde(
+def plot_kde(
     df: pd.DataFrame,
     metric: str,
     group_col: str,
-    cancer_type: str,
-    out_dir: str,
+    title: str,
+    out_path: str,
 ) -> None:
-    """Overlaid KDE plot of a metric split by group_col, for one cancer type."""
     fig, ax = plt.subplots(figsize=(8, 5))
+    colours = sns.color_palette("Set2")
  
-    for group, colour in zip(
-        sorted(df[group_col].dropna().unique()),
-        sns.color_palette("Set2"),
-    ):
+    for i, group in enumerate(sorted(df[group_col].dropna().unique())):
         subset = df.loc[df[group_col] == group, metric].dropna()
         if len(subset) >= 5:
             sns.kdeplot(subset, ax=ax, label=f"{group} (n={len(subset)})",
-                        fill=True, alpha=0.3, color=colour)
+                        fill=True, alpha=0.3, color=colours[i % len(colours)])
  
     ax.set_xlabel(metric)
     ax.set_ylabel("Density")
-    ax.set_title(f"{metric} distribution by {group_col} — {cancer_type}")
-    ax.legend()
+    ax.set_title(title)
+    ax.legend(fontsize=9)
     plt.tight_layout()
- 
-    os.makedirs(out_dir, exist_ok=True)
-    plt.savefig(
-        os.path.join(out_dir, f"{cancer_type}_{metric}_{group_col}_kde.png"),
-        dpi=120, bbox_inches="tight"
-    )
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    plt.savefig(out_path, dpi=120, bbox_inches="tight")
     plt.close()
  
  
-def plot_summary_heatmap(
-    summary_df: pd.DataFrame,
-    group_col: str,
-    cancer_type: str,
-    out_dir: str,
+def plot_effect_heatmap(
+    results_df: pd.DataFrame,
+    comparison_label: str,
+    out_path: str,
 ) -> None:
     """
-    Heatmap of effect sizes across all metrics for one cancer type and group_col.
-    Green = negligible difference (safe to pool), red = meaningful difference.
+    Heatmap of effect sizes per metric for one comparison.
+    Green = negligible (safe to pool), red = meaningful difference.
     """
-    subset = summary_df[
-        (summary_df["group_col"]    == group_col) &
-        (summary_df["cancer_type"]  == cancer_type) &
-        (summary_df["max_effect_size"].notna())
-    ].set_index("metric")[["max_effect_size", "significant"]].copy()
+    pivot = results_df.set_index("metric")[["effect_r", "recommendation"]].copy()
+    pivot = pivot[pivot["effect_r"].notna()].sort_values("effect_r", ascending=False)
  
-    if subset.empty:
+    if pivot.empty:
         return
  
-    fig, ax = plt.subplots(figsize=(4, max(5, len(subset) * 0.35)))
- 
+    fig, ax = plt.subplots(figsize=(4, max(6, len(pivot) * 0.38)))
     cmap = sns.diverging_palette(130, 10, as_cmap=True)
+ 
     sns.heatmap(
-        subset[["max_effect_size"]],
+        pivot[["effect_r"]],
         annot=True, fmt=".3f",
         cmap=cmap,
         vmin=0, vmax=0.5,
-        center=NEGLIGIBLE_EFFECT_SIZE,
+        center=NEGLIGIBLE_EFFECT,
         linewidths=0.5,
         ax=ax,
-        cbar_kws={"label": "Rank-biserial correlation (effect size)"},
+        cbar_kws={"label": "Effect size (rank-biserial r)"},
     )
  
-    # Mark significant metrics with an asterisk
-    for i, (metric, row) in enumerate(subset.iterrows()):
-        if row["significant"]:
-            ax.text(1.02, i + 0.5, "*", transform=ax.transAxes,
-                    fontsize=12, color="red", va="center")
+    # Flag significant meaningful differences
+    for i, (metric, row) in enumerate(pivot.iterrows()):
+        if row["recommendation"] == "do not pool":
+            ax.text(1.03, i + 0.5, "✗", transform=ax.transAxes,
+                    fontsize=11, color="red", va="center")
+        elif row["recommendation"].startswith("pool"):
+            ax.text(1.03, i + 0.5, "✓", transform=ax.transAxes,
+                    fontsize=11, color="green", va="center")
  
-    ax.set_title(f"Effect sizes — {group_col} — {cancer_type}\n* = significant after Bonferroni")
+    ax.set_title(
+        f"{comparison_label}\n"
+        f"✓ = pool  ✗ = do not pool",
+        fontsize=10
+    )
     ax.set_ylabel("")
     plt.tight_layout()
- 
-    os.makedirs(out_dir, exist_ok=True)
-    plt.savefig(
-        os.path.join(out_dir, f"{cancer_type}_{group_col}_effect_size_heatmap.png"),
-        dpi=150, bbox_inches="tight"
-    )
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    plt.savefig(out_path, dpi=150, bbox_inches="tight")
     plt.close()
-    logging.info(f"Effect size heatmap saved: {cancer_type} | {group_col}")
+    logging.info(f"Heatmap saved: {out_path}")
  
  
 # ── Orchestrator ──────────────────────────────────────────────────────────────
  
 def run_grouping_assessment(
-    file_path: str,
+    df: pd.DataFrame,
     out_dir: str,
-    group_cols: list = GROUP_COLS,
     features: list = None,
 ) -> pd.DataFrame:
     """
-    Full grouping assessment pipeline.
+    Runs two sets of comparisons:
  
-    For each cancer type, tests every QC metric for significant differences
-    across each grouping variable (sequencer, pipeline version, etc.).
+    1. Pipeline version comparisons (within each parent group):
+           solid_tumour vs solid_tumour_v3
+           haem_v2 vs haem_v3
  
-    Produces:
-    - Statistical summary CSV
-    - Box plots and KDE plots per metric
-    - Effect size heatmaps per cancer type per group variable
+    2. Sequencer comparisons (within each cancer_type):
+           for each of solid_tumour, solid_tumour_v3, haem_v2, haem_v3:
+               sequencer A vs sequencer B
  
-    Parameters
-    ----------
-    file_path : str
-        Path to QC summary TSV.
-    out_dir : str
-        Root output directory.
-    group_cols : list
-        Columns to test grouping by (e.g. ['sequencer', 'pipeline_version']).
-    features : list
-        QC metrics to test. Defaults to MODEL_FEATURES (numeric only).
- 
-    Returns
-    -------
-    pd.DataFrame
-        Summary table with one row per metric / cancer type / group column.
+    Returns a summary DataFrame with one row per metric per comparison.
     """
     if features is None:
-        # Use only numeric model features — exclude OHE columns
-        features = [f for f in config.MODEL_FEATURES if not f.startswith("fastqc_basic_status_")]
+        features = [f for f in NUMERIC_FEATURES if f in df.columns]
  
-    # Load and fix types
-    df = load_data(file_path)
-    df = fix_data_types(df)
+    # Fix picard_fold80 type issue
+    df = df.copy()
+    df["picard_fold80"] = pd.to_numeric(
+        df["picard_fold80"].replace("?", np.nan), errors="coerce"
+    )
  
-    cancer_types = df[CANCER_TYPE_COL].unique()
-    logging.info(f"Cancer types found: {cancer_types.tolist()}")
-    logging.info(f"Group columns to test: {group_cols}")
-    logging.info(f"Metrics to test: {len(features)}")
- 
-    boxplot_dir = os.path.join(out_dir, "boxplots")
-    kde_dir     = os.path.join(out_dir, "kde_plots")
-    heatmap_dir = os.path.join(out_dir, "heatmaps")
+    # Add parent group and version columns
+    df["parent_group"] = df[CANCER_TYPE_COL].map(
+        lambda x: PIPELINE_GROUPS.get(x, {}).get("parent", x)
+    )
+    df["pipeline_version"] = df[CANCER_TYPE_COL].map(
+        lambda x: PIPELINE_GROUPS.get(x, {}).get("version", x)
+    )
  
     all_results = []
+    sep = "=" * 60
  
-    for cancer_type in cancer_types:
-        ct_df = df[df[CANCER_TYPE_COL] == cancer_type].copy()
-        logging.info(f"\n{'='*55}")
-        logging.info(f"Cancer type: {cancer_type} | n={len(ct_df)}")
-        logging.info(f"{'='*55}")
- 
-        for group_col in group_cols:
-            if group_col not in ct_df.columns:
-                logging.warning(f"Column '{group_col}' not found — skipping.")
-                continue
- 
-            group_counts = ct_df[group_col].value_counts()
-            logging.info(f"\nGroup col: {group_col}")
-            logging.info(f"Groups:\n{group_counts.to_string()}")
- 
-            for metric in features:
-                if metric not in ct_df.columns:
-                    continue
- 
-                result = test_metric_across_groups(ct_df, metric, group_col)
-                result["cancer_type"] = cancer_type
-                all_results.append(result)
- 
-                logging.info(
-                    f"  {metric:<45} "
-                    f"p={result['kruskal_p']:.4f}  "
-                    f"effect={result['max_effect_size']:.3f}  "
-                    f"→ {result['recommendation']}"
-                )
- 
-                # Plots
-                plot_metric_boxplot(ct_df, metric, group_col, cancer_type, boxplot_dir)
-                plot_metric_kde(ct_df, metric, group_col, cancer_type, kde_dir)
- 
-    # Build summary DataFrame
-    summary_rows = []
-    for r in all_results:
-        summary_rows.append({
-            "cancer_type":     r.get("cancer_type"),
-            "group_col":       r.get("group_col"),
-            "metric":          r.get("metric"),
-            "n_groups":        r.get("n_groups"),
-            "kruskal_p":       r.get("kruskal_p"),
-            "significant":     r.get("significant"),
-            "max_effect_size": r.get("max_effect_size"),
-            "recommendation":  r.get("recommendation"),
-            "notes":           r.get("notes", ""),
-        })
- 
-    summary_df = pd.DataFrame(summary_rows)
- 
-    # Heatmaps
-    for cancer_type in cancer_types:
-        for group_col in group_cols:
-            plot_summary_heatmap(summary_df, group_col, cancer_type, heatmap_dir)
- 
-    # Overall recommendation per cancer type / group col
-    sep = "=" * 55
+    # ── 1. Pipeline version comparisons ──────────────────────────────────────
     logging.info(f"\n{sep}")
-    logging.info("GROUPING ASSESSMENT — OVERALL RECOMMENDATIONS")
+    logging.info("COMPARISON 1: Pipeline versions")
+    logging.info("Can solid_tumour and solid_tumour_v3 be pooled?")
+    logging.info("Can haem_v2 and haem_v3 be pooled?")
     logging.info(sep)
  
-    for cancer_type in cancer_types:
-        for group_col in group_cols:
-            subset = summary_df[
-                (summary_df["cancer_type"] == cancer_type) &
-                (summary_df["group_col"]   == group_col)
-            ]
-            if subset.empty:
-                continue
+    for parent in df["parent_group"].unique():
+        parent_df = df[df["parent_group"] == parent]
+        versions  = parent_df[CANCER_TYPE_COL].unique()
  
-            n_do_not_pool = (subset["recommendation"] == "do not pool").sum()
-            n_pool        = (subset["recommendation"].str.startswith("pool")).sum()
-            n_total       = len(subset)
+        if len(versions) < 2:
+            logging.warning(f"  {parent}: only one version found, skipping.")
+            continue
  
-            logging.info(f"\n  {cancer_type} | {group_col}")
-            logging.info(f"  Metrics where pooling is safe:    {n_pool} / {n_total}")
-            logging.info(f"  Metrics where pooling is NOT safe: {n_do_not_pool} / {n_total}")
+        # For exactly two versions, one pairwise comparison per metric
+        v_a, v_b     = versions[0], versions[1]
+        comparison   = f"pipeline_version_{parent}"
+        n_metrics    = len(features)
  
-            if n_do_not_pool == 0:
-                logging.info(f"  ✓ RECOMMENDATION: pool across {group_col} for {cancer_type}")
-            elif n_do_not_pool <= 2:
-                logging.info(
-                    f"  ~ RECOMMENDATION: pooling likely acceptable — "
-                    f"review {n_do_not_pool} metric(s) manually"
-                )
-                do_not_pool_metrics = subset[
-                    subset["recommendation"] == "do not pool"
-                ]["metric"].tolist()
-                logging.info(f"    Metrics to review: {do_not_pool_metrics}")
-            else:
-                logging.info(
-                    f"  ✗ RECOMMENDATION: do not pool across {group_col} for {cancer_type} — "
-                    f"{n_do_not_pool} metrics differ meaningfully"
-                )
+        logging.info(f"\n  {parent}: {v_a} vs {v_b}")
+        logging.info(f"  n_{v_a} = {(parent_df[CANCER_TYPE_COL]==v_a).sum()}")
+        logging.info(f"  n_{v_b} = {(parent_df[CANCER_TYPE_COL]==v_b).sum()}")
  
-    # Save summary
+        comp_results = []
+        for metric in features:
+            result = test_two_groups(
+                group_a      = parent_df.loc[parent_df[CANCER_TYPE_COL]==v_a, metric],
+                group_b      = parent_df.loc[parent_df[CANCER_TYPE_COL]==v_b, metric],
+                label_a      = v_a,
+                label_b      = v_b,
+                metric       = metric,
+                n_comparisons = n_metrics,   # Bonferroni across all metrics
+            )
+            result["comparison"] = comparison
+            result["parent"]     = parent
+            comp_results.append(result)
+            all_results.append(result)
+ 
+            logging.info(
+                f"    {metric:<45} "
+                f"p={result['corrected_p']:.4f}  "
+                f"r={result['effect_r']:.3f} ({result['effect_interp']})  "
+                f"→ {result['recommendation']}"
+            )
+ 
+            # Plots
+            plot_boxplot(
+                parent_df, metric, CANCER_TYPE_COL,
+                title=f"{metric} — {parent}: pipeline version comparison",
+                out_path=os.path.join(out_dir, "boxplots", f"{comparison}_{metric}.png"),
+            )
+            plot_kde(
+                parent_df, metric, CANCER_TYPE_COL,
+                title=f"{metric} — {parent}: pipeline version comparison",
+                out_path=os.path.join(out_dir, "kde_plots", f"{comparison}_{metric}.png"),
+            )
+ 
+        # Heatmap for this comparison
+        comp_df = pd.DataFrame(comp_results)
+        plot_effect_heatmap(
+            comp_df,
+            comparison_label=f"{parent}: {v_a} vs {v_b}",
+            out_path=os.path.join(out_dir, "heatmaps", f"{comparison}_heatmap.png"),
+        )
+ 
+        # Overall recommendation for this pipeline comparison
+        n_do_not_pool = (comp_df["recommendation"] == "do not pool").sum()
+        n_review      = (comp_df["recommendation"] == "review").sum()
+        logging.info(f"\n  Summary for {parent} pipeline version comparison:")
+        logging.info(f"    Safe to pool:   {(comp_df['recommendation'].str.startswith('pool')).sum()} / {n_metrics}")
+        logging.info(f"    Review:         {n_review} / {n_metrics}")
+        logging.info(f"    Do not pool:    {n_do_not_pool} / {n_metrics}")
+        if n_do_not_pool == 0 and n_review == 0:
+            logging.info(f"    ✓ RECOMMENDATION: pool {v_a} and {v_b}")
+        elif n_do_not_pool == 0:
+            metrics_to_review = comp_df[comp_df["recommendation"]=="review"]["metric"].tolist()
+            logging.info(f"    ~ RECOMMENDATION: likely poolable — review: {metrics_to_review}")
+        else:
+            do_not_pool_metrics = comp_df[comp_df["recommendation"]=="do not pool"]["metric"].tolist()
+            logging.info(f"    ✗ RECOMMENDATION: do NOT pool — differing metrics: {do_not_pool_metrics}")
+ 
+    # ── 2. Sequencer comparisons ──────────────────────────────────────────────
+    logging.info(f"\n{sep}")
+    logging.info("COMPARISON 2: Sequencers")
+    logging.info("Within each cancer_type, can sequencer A and B be pooled?")
+    logging.info(sep)
+ 
+    for cancer_type in df[CANCER_TYPE_COL].unique():
+        ct_df      = df[df[CANCER_TYPE_COL] == cancer_type]
+        sequencers = ct_df[SEQUENCER_COL].dropna().unique()
+ 
+        if len(sequencers) < 2:
+            logging.warning(f"  {cancer_type}: only one sequencer found, skipping.")
+            continue
+ 
+        seq_a, seq_b = sequencers[0], sequencers[1]
+        comparison   = f"sequencer_{cancer_type}"
+        n_metrics    = len(features)
+ 
+        logging.info(f"\n  {cancer_type}: {seq_a} vs {seq_b}")
+        logging.info(f"  n_{seq_a} = {(ct_df[SEQUENCER_COL]==seq_a).sum()}")
+        logging.info(f"  n_{seq_b} = {(ct_df[SEQUENCER_COL]==seq_b).sum()}")
+ 
+        comp_results = []
+        for metric in features:
+            result = test_two_groups(
+                group_a       = ct_df.loc[ct_df[SEQUENCER_COL]==seq_a, metric],
+                group_b       = ct_df.loc[ct_df[SEQUENCER_COL]==seq_b, metric],
+                label_a       = seq_a,
+                label_b       = seq_b,
+                metric        = metric,
+                n_comparisons = n_metrics,
+            )
+            result["comparison"] = comparison
+            result["cancer_type_tested"] = cancer_type
+            comp_results.append(result)
+            all_results.append(result)
+ 
+            logging.info(
+                f"    {metric:<45} "
+                f"p={result['corrected_p']:.4f}  "
+                f"r={result['effect_r']:.3f} ({result['effect_interp']})  "
+                f"→ {result['recommendation']}"
+            )
+ 
+            # Plots
+            plot_boxplot(
+                ct_df, metric, SEQUENCER_COL,
+                title=f"{metric} — {cancer_type}: sequencer comparison",
+                out_path=os.path.join(out_dir, "boxplots", f"{comparison}_{metric}.png"),
+            )
+            plot_kde(
+                ct_df, metric, SEQUENCER_COL,
+                title=f"{metric} — {cancer_type}: sequencer comparison",
+                out_path=os.path.join(out_dir, "kde_plots", f"{comparison}_{metric}.png"),
+            )
+ 
+        # Heatmap
+        comp_df = pd.DataFrame(comp_results)
+        plot_effect_heatmap(
+            comp_df,
+            comparison_label=f"{cancer_type}: {seq_a} vs {seq_b}",
+            out_path=os.path.join(out_dir, "heatmaps", f"{comparison}_heatmap.png"),
+        )
+ 
+        # Overall recommendation
+        n_do_not_pool = (comp_df["recommendation"] == "do not pool").sum()
+        n_review      = (comp_df["recommendation"] == "review").sum()
+        logging.info(f"\n  Summary for {cancer_type} sequencer comparison:")
+        logging.info(f"    Safe to pool:   {(comp_df['recommendation'].str.startswith('pool')).sum()} / {n_metrics}")
+        logging.info(f"    Review:         {n_review} / {n_metrics}")
+        logging.info(f"    Do not pool:    {n_do_not_pool} / {n_metrics}")
+        if n_do_not_pool == 0 and n_review == 0:
+            logging.info(f"    ✓ RECOMMENDATION: pool {seq_a} and {seq_b} for {cancer_type}")
+        elif n_do_not_pool == 0:
+            metrics_to_review = comp_df[comp_df["recommendation"]=="review"]["metric"].tolist()
+            logging.info(f"    ~ RECOMMENDATION: likely poolable — review: {metrics_to_review}")
+        else:
+            do_not_pool_metrics = comp_df[comp_df["recommendation"]=="do not pool"]["metric"].tolist()
+            logging.info(f"    ✗ RECOMMENDATION: do NOT pool — differing metrics: {do_not_pool_metrics}")
+ 
+    # ── Final summary ─────────────────────────────────────────────────────────
+    summary_df = pd.DataFrame(all_results)
+    out_path   = os.path.join(out_dir, "assess_grouping_summary.csv")
     os.makedirs(out_dir, exist_ok=True)
-    summary_path = os.path.join(out_dir, "assess_grouping_summary.csv")
-    summary_df.to_csv(summary_path, index=False)
-    logging.info(f"\nSummary saved to {summary_path}")
+    summary_df.to_csv(out_path, index=False)
+    logging.info(f"\nFull summary saved to {out_path}")
  
     return summary_df
  
@@ -468,16 +487,22 @@ def run_grouping_assessment(
 # ── Entry point ───────────────────────────────────────────────────────────────
  
 if __name__ == "__main__":
+    import config
+    from pipeline.preprocess import load_data
+ 
+    df = load_data(config.SUMMARY_QC_METRICS)
  
     summary = run_grouping_assessment(
-        file_path=config.SUMMARY_QC_METRICS,
-        out_dir=os.path.join(config.PREPROCESSING_OUTDIR, "grouping_assessment"),
-        group_cols=[SEQUENCER_COL],   # add PIPELINE_COL here if you have it
+        df=df,
+        out_dir=os.path.join(config.PREPROCESSING_PLOT_DIR, "grouping_assessment"),
     )
  
-    # Print a quick readable table of do-not-pool metrics
-    do_not_pool = summary[summary["recommendation"] == "do not pool"]
-    if do_not_pool.empty:
-        logging.info("\n✓ All metrics safe to pool across tested grouping variables.")
+    # Quick readable table of anything flagged as do-not-pool or review
+    flagged = summary[summary["recommendation"].isin(["do not pool", "review"])]
+    if flagged.empty:
+        logging.info("\n✓ All metrics safe to pool across all tested comparisons.")
     else:
-        logging.info(f"\nMetrics flagged as do-not-pool:\n{do_not_pool[['cancer_type','group_col','metric','kruskal_p','max_effect_size']].to_string(index=False)}")
+        logging.info(
+            f"\nMetrics requiring attention:\n"
+            f"{flagged[['comparison','metric','corrected_p','effect_r','recommendation']].to_string(index=False)}"
+        )

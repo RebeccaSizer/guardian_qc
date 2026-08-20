@@ -44,6 +44,7 @@ FILTERED_RUN_QC_DATA = "data/processed/filtered_by_run_metrics(1).csv"
 
 # Set file path to summary_qc_metrics.csv file
 SUMMARY_QC_METRICS = "data/processed/summary_qc_metrics(2).csv"
+SUMMARY_QC_METRICS_CLEANED = "data/processed/cleaned_summary_qc_metrics(3).csv"
 
 # Set variables for preprocessing 
 # Define the model features 
@@ -82,6 +83,6 @@ STRATIFY_COLUMNS = ['cancer_type', 'sequencer']
 
 # Set output directory for preprocessing files 
 PREPROCESSING_OUTDIR = 'models/preprocessing/'
-
+UNSUPERVISED_MODELS_DIR = 'models/unsupervised/'
 PREPROCESSING_PLOT_DIR = 'outputs/graphs/preprocessing/'
 
