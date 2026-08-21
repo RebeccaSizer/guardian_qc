@@ -150,12 +150,12 @@ def score_samples(model: IsolationForest, X: pd.DataFrame, assay: str, split: st
  
     output:
         pd.DataFrame
-            X with anomaly_score and anomaly_label columns appended.
+            X with anomaly_score for each metric and anomaly_label column appended to end.
     """
 
     X_scored = X.copy()
     X_scored['anomaly_score'] = model.decision_function(X) # Apply the model - this gives a metric of how far away the value is from the median?
-    X_scored['anomaly_label'] = model.predict(X) # Apple the model to the data so it predicts if it is an outlier
+    X_scored['anomaly_label'] = model.predict(X) # Apple the model to the data so it predicts if it is an outlier (-1 anomaly)
 
     n_flagged = (X_scored['anomaly_label'] == -1).sum()
     n_total = len(X_scored)
@@ -165,7 +165,7 @@ def score_samples(model: IsolationForest, X: pd.DataFrame, assay: str, split: st
         f"[{assay}] Scored {split} set | "
         f"n={n_total} | flagged={n_flagged} ({flag_rate:.1f}%)"
     )
-    print(X_scored)
+
     return X_scored
 
 def explain_outlier(
@@ -193,14 +193,14 @@ def explain_outlier(
         top_n : int
             Number of top deviant features to return.
     """
-    feature_cols  = [c for c in sample.index if c not in ("anomaly_score", "anomaly_label")]
+    feature_cols  = [c for c in sample.index if c not in ("anomaly_score", "anomaly_label")] # gives a list of feature columns
     sample_feats  = sample[feature_cols]
     train_feats   = X_train[feature_cols]
 
-    train_median  = train_feats.median()
-    train_mad     = train_feats.apply(lambda col: (col - col.median()).abs().median())
+    train_median  = train_feats.median() # calculate median from the training data
+    train_mad     = train_feats.apply(lambda col: (col - col.median()).abs().median()) # calculate the median absolute devisation
 
-    robust_z      = (sample_feats - train_median) / (train_mad + 1e-9)
+    robust_z      = (sample_feats - train_median) / (train_mad + 1e-9) # hwo many SD the value is from the mean 
 
     result = pd.DataFrame({
         "feature":        feature_cols,
@@ -208,8 +208,9 @@ def explain_outlier(
         "train_median":   train_median.values,
         "mad":            train_mad.values,
         "robust_z_score": robust_z.abs().values,
-    }).sort_values("robust_z_score", ascending=False).head(top_n).reset_index(drop=True)
+    }).sort_values("robust_z_score", ascending=False).head(top_n).reset_index(drop=True) # sort the z score and only keep n number (most affecting the score)
 
+    #print(f"explain outlier result: {result}")
     return result
 
 def explain_all_outliers(
@@ -217,6 +218,7 @@ def explain_all_outliers(
         X_train: pd.DataFrame,
         assay: str,
         out_dir: str,
+        split: str,
         top_n: int = TOP_N_FEATURES,
     ) -> pd.DataFrame:
     """
@@ -252,7 +254,7 @@ def explain_all_outliers(
     all_explanations = pd.concat(explanation_rows, ignore_index=True)
  
     os.makedirs(out_dir, exist_ok=True)
-    out_path = os.path.join(out_dir, f"{assay}_outlier_explanations.csv")
+    out_path = os.path.join(out_dir, f"{assay}_{split}_outlier_explanations.csv")
     all_explanations.to_csv(out_path, index=False)
     logging.info(f"[{assay}] Explanations saved to {out_path}")
  
@@ -288,9 +290,18 @@ def log_model_summary(
     if auprc is not None:
         logging.info(f"  {'AUPRC (labelled eval):':<35} {auprc:.4f}")
     logging.info(sep)
+
+
+def attach_metadata(X_scored: pd.DataFrame, meta: pd.DataFrame) -> pd.DataFrame:
+    """
+    Join sample metadata back onto a scored feature matrix by index.
+    Metadata columns are prepended so they appear first in the output.
+    """
+    merged = meta.join(X_scored[["anomaly_score", "anomaly_label"]], how="inner")
+    return merged
+
  
- 
-def run_model_train(X_train, X_test, assay, contamination, out_dir):
+def run_model_train(X_train, X_test, train_meta, test_meta, assay, contamination, out_dir):
 
     model = fit_isolation_forest(X_train, assay, contamination)
     save_model(model, assay, out_dir)
@@ -298,10 +309,18 @@ def run_model_train(X_train, X_test, assay, contamination, out_dir):
     X_train_scored = score_samples(model, X_train, assay, 'train')
     X_test_scored = score_samples(model, X_test, assay, 'test')
 
-    X_train_scored_explained = explain_all_outliers(X_train_scored, X_train, assay, out_dir, TOP_N_FEATURES)
-    X_test_scored_explained = explain_all_outliers(X_test_scored, X_test, assay, out_dir, TOP_N_FEATURES)
+    # Attach metadata so you can identify samples by name
+    train_results = attach_metadata(X_train_scored, train_meta)
+    test_results  = attach_metadata(X_test_scored,  test_meta)
 
-    print(X_train_scored_explained)
+    # Save the full scored + metadata output for manual review
+    os.makedirs(out_dir, exist_ok=True)
+    train_results.to_csv(os.path.join(out_dir, f"{assay}_train_scored.csv"), index=True)
+    test_results.to_csv( os.path.join(out_dir, f"{assay}_test_scored.csv"),  index=True)
+    logging.info(f"[{assay}] Scored outputs with metadata saved to {out_dir}")
+
+    X_train_scored_explained = explain_all_outliers(X_train_scored, X_train, assay, out_dir, 'train', TOP_N_FEATURES)
+    X_test_scored_explained = explain_all_outliers(X_test_scored, X_train, assay, out_dir, 'test', TOP_N_FEATURES)
 
     # For model summary 
     n_train = len(X_train)
@@ -324,5 +343,5 @@ if __name__ == "__main__":
     X_train_haem, X_test_haem, train_meta_haem, test_meta_haem = run_preprocessing(config.SUMMARY_QC_METRICS, 'haem', out_dir=None)
     X_train_ST, X_test_ST, train_meta_ST, test_meta_ST = run_preprocessing(config.SUMMARY_QC_METRICS, 'ST', out_dir=None)
 
-    run_model_train(X_train_haem, X_test_haem, 'haem', 0.05, os.path.join('models/trained', 'haem'))
-    run_model_train(X_train_ST, X_test_ST, 'ST', 0.20, os.path.join('models/trained', 'ST'))
+    run_model_train(X_train_haem, X_test_haem, train_meta_haem, test_meta_haem, 'haem', 0.05, os.path.join('models/trained', 'haem'))
+    run_model_train(X_train_ST, X_test_ST, train_meta_ST, test_meta_ST, 'ST', 0.20, os.path.join('models/trained', 'ST'))
