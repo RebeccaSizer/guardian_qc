@@ -63,6 +63,7 @@ from pipeline.preprocess import run_preprocessing
 from outputs.graphs.train.train_graphs import plot_score_distribution, plot_flagging_rates, plot_top_deviant_features, evaluate_with_labels
 from utils.logger import logging
 import config
+import argparse
  
 # Set constants that will be used in the script
 CONTAMINATION = 0.05
@@ -70,11 +71,11 @@ N_ESTIMATORS = 100 # The number of base estimators in the ensemble (Number of de
 RANDOM_STATE = 42 # Controls the pseudo-randomness of the selection of the features and the split values - needed to build a reproducible random sequence
  
 # Top features to report
-TOP_N_FEATURES = 5
+TOP_N_FEATURES = 3
  
 # Unsupervised model training
 # Isolation forest
-def fit_isolation_forest(X_train: pd.DataFrame, assay: str, contamination: float):
+def fit_isolation_forest(X_train: pd.DataFrame, assay: str, version: str, contamination: float):
     """
     Fit an Isolation Forest on a single assay's preprocessed training data.
    
@@ -90,7 +91,7 @@ def fit_isolation_forest(X_train: pd.DataFrame, assay: str, contamination: float
     Return:
         IsolationForest: Fitted model
     """
-    logging.info(f"[{assay}] Fitting isolation forest |"
+    logging.info(f"[{assay}_{version}] Fitting isolation forest |"
                  f"n_samples={len(X_train)} | n_features={X_train.shape[1]}"
                  f"contamination={contamination}")
    
@@ -100,35 +101,36 @@ def fit_isolation_forest(X_train: pd.DataFrame, assay: str, contamination: float
         random_state=RANDOM_STATE,
         n_jobs=-1 #run jobs in parallel
     )
+
     model.fit(X_train)
-    logging.info(f"Isolation forest fitted for assay: {assay} | n_samples: {len(X_train)}")
+    logging.info(f"Isolation forest fitted for assay: {assay}_{version} | n_samples: {len(X_train)}")
     return model
  
  
 # Save the models to a set location
  
-def save_model(model: IsolationForest, assay: str, outdir: str) -> None:
+def save_model(model: IsolationForest, assay: str, version: str, outdir: str) -> None:
     """ Save a fitted IsolationForest to disk"""
  
     os.makedirs(outdir, exist_ok = True)
-    path = os.path.join(outdir, f"{assay}_isolation_forest.pkl")
+    path = os.path.join(outdir, f"{assay}_{version}_isolation_forest.pkl")
     joblib.dump(model, path)
  
-    logging.info(f"{assay} | Model saved to {path}")
+    logging.info(f"{assay}_{version} | Model saved to {path}")
  
 # Load the models
-def load_model(assay: str, model_dir: str) -> IsolationForest:
+def load_model(assay: str, version: str, model_dir: str) -> IsolationForest:
     """ Load a fitted IsolationForest model"""
 
-    path = os.join.path(model_dir, f"{assay}_isolation_forest.pkl")
+    path = os.join.path(model_dir, f"{assay}_{version}_isolation_forest.pkl")
     model = joblib.load(path)
-    logging.info(f"[{assay}] Model loaded from path {path}")
+    logging.info(f"[{assay}_{version}] Model loaded from path {path}")
     return model
 
 
 # This is a function that will add a score to the data 
 # to indicate if it or isn't an outlier
-def score_samples(model: IsolationForest, X: pd.DataFrame, assay: str, split: str) -> pd.DataFrame:
+def score_samples(model: IsolationForest, X: pd.DataFrame, assay: str, version: str, split: str) -> pd.DataFrame:
     """
     Score a feature matrix using a fitted Isolation Forest.
  
@@ -162,7 +164,7 @@ def score_samples(model: IsolationForest, X: pd.DataFrame, assay: str, split: st
     flag_rate = 100 * n_flagged / n_total
 
     logging.info(
-        f"[{assay}] Scored {split} set | "
+        f"[{assay}_{version}] Scored {split} set | "
         f"n={n_total} | flagged={n_flagged} ({flag_rate:.1f}%)"
     )
 
@@ -187,13 +189,16 @@ def explain_outlier(
 
     params
         sample : pd.Series
-            One row from a scored feature matrix (excluding anomaly_score/label).
+            One row from a scored feature matrix (excluding anomaly_score/label/sample_name/sequencer/cancer_type/assay_type).
         X_train : pd.DataFrame
             Training feature matrix (same columns, pre-scoring).
         top_n : int
             Number of top deviant features to return.
     """
-    feature_cols  = [c for c in sample.index if c not in ("anomaly_score", "anomaly_label")] # gives a list of feature columns
+    feature_cols = [
+        c for c in sample.index
+        if c in X_train.columns
+    ]
     sample_feats  = sample[feature_cols]
     train_feats   = X_train[feature_cols]
 
@@ -217,6 +222,7 @@ def explain_all_outliers(
         X_scored: pd.DataFrame,
         X_train: pd.DataFrame,
         assay: str,
+        version: str,
         out_dir: str,
         split: str,
         top_n: int = TOP_N_FEATURES,
@@ -228,13 +234,13 @@ def explain_all_outliers(
     Returns a long-format DataFrame with one row per (sample, feature).
     """
     flagged = X_scored[X_scored["anomaly_label"] == -1]
-    logging.info(f"[{assay}] Explaining {len(flagged)} flagged samples...")
+    logging.info(f"[{assay}_{version}] Explaining {len(flagged)} flagged samples...")
  
     explanation_rows = []
  
     for idx, row in flagged.iterrows():
         explanation = explain_outlier(row, X_train, top_n=top_n)
-        explanation.insert(0, "sample_index", idx)
+        explanation.insert(0, "sample_name", row["sample_name"])
         explanation.insert(1, "anomaly_score", row["anomaly_score"])
         explanation_rows.append(explanation)
  
@@ -248,15 +254,15 @@ def explain_all_outliers(
         )
  
     if not explanation_rows:
-        logging.info(f"[{assay}] No flagged samples to explain.")
+        logging.info(f"[{assay}_{version}] No flagged samples to explain.")
         return pd.DataFrame()
  
     all_explanations = pd.concat(explanation_rows, ignore_index=True)
  
     os.makedirs(out_dir, exist_ok=True)
-    out_path = os.path.join(out_dir, f"{assay}_{split}_outlier_explanations.csv")
+    out_path = os.path.join(out_dir, f"{assay}_{version}_{split}_outlier_explanations.csv")
     all_explanations.to_csv(out_path, index=False)
-    logging.info(f"[{assay}] Explanations saved to {out_path}")
+    logging.info(f"[{assay}_{version}] Explanations saved to {out_path}")
  
     return all_explanations
  
@@ -265,6 +271,7 @@ def explain_all_outliers(
  
 def log_model_summary(
     assay: str,
+    version: str,
     n_train: int,
     n_test: int,
     n_flagged_train: int,
@@ -274,7 +281,7 @@ def log_model_summary(
 ) -> None:
     sep = "=" * 55
     logging.info(sep)
-    logging.info(f"MODEL SUMMARY — {assay}")
+    logging.info(f"MODEL SUMMARY — {assay}_{version}")
     logging.info(sep)
     logging.info(f"  {'Contamination parameter:':<35} {contamination}")
     logging.info(f"  {'Training samples:':<35} {n_train}")
@@ -297,30 +304,28 @@ def attach_metadata(X_scored: pd.DataFrame, meta: pd.DataFrame) -> pd.DataFrame:
     Join sample metadata back onto a scored feature matrix by index.
     Metadata columns are prepended so they appear first in the output.
     """
-    merged = meta.join(X_scored[["anomaly_score", "anomaly_label"]], how="inner")
+    merged = meta.join(X_scored, how="inner")
     return merged
 
  
-def run_model_train(X_train, X_test, train_meta, test_meta, assay, contamination, out_dir):
+def run_model_train(X_train, X_test, train_meta, test_meta, assay, version, contamination, out_dir):
 
-    model = fit_isolation_forest(X_train, assay, contamination)
-    save_model(model, assay, out_dir)
+    model = fit_isolation_forest(X_train, assay, version, contamination)
+    save_model(model, assay, version, out_dir)
 
-    X_train_scored = score_samples(model, X_train, assay, 'train')
-    X_test_scored = score_samples(model, X_test, assay, 'test')
+    X_train_scored = score_samples(model, X_train, assay, version, 'train')
+    X_test_scored = score_samples(model, X_test, assay, version, 'test')
 
     # Attach metadata so you can identify samples by name
     train_results = attach_metadata(X_train_scored, train_meta)
     test_results  = attach_metadata(X_test_scored,  test_meta)
 
-    # Save the full scored + metadata output for manual review
-    os.makedirs(out_dir, exist_ok=True)
-    train_results.to_csv(os.path.join(out_dir, f"{assay}_train_scored.csv"), index=True)
-    test_results.to_csv( os.path.join(out_dir, f"{assay}_test_scored.csv"),  index=True)
-    logging.info(f"[{assay}] Scored outputs with metadata saved to {out_dir}")
+    X_train_scored_explained = explain_all_outliers(train_results, X_train, assay, version, out_dir, 'train', TOP_N_FEATURES)
+    X_test_scored_explained = explain_all_outliers(train_results, X_train, assay, version, out_dir, 'test', TOP_N_FEATURES)
 
-    X_train_scored_explained = explain_all_outliers(X_train_scored, X_train, assay, out_dir, 'train', TOP_N_FEATURES)
-    X_test_scored_explained = explain_all_outliers(X_test_scored, X_train, assay, out_dir, 'test', TOP_N_FEATURES)
+    print(X_test_scored_explained)
+
+    print(X_test_scored_explained)
 
     # For model summary 
     n_train = len(X_train)
@@ -330,18 +335,78 @@ def run_model_train(X_train, X_test, train_meta, test_meta, assay, contamination
 
     log_model_summary(
         assay,
+        version,
         n_train,
         n_test,
         n_flagged_train,
         n_flagged_test,
         contamination
         )
+
+    #merge explanations with the scored daraframe
+    model_output_train = train_results.merge(X_train_scored_explained[['sample_name', 'feature', 'sample_value', 'train_median', 'mad', 'robust_z_score']], 
+                                             on='sample_name', how='left')
+
+    model_output_test = test_results.merge(X_test_scored_explained[['sample_name', 'feature', 'sample_value', 'train_median', 'mad', 'robust_z_score']], 
+                                                 on='sample_name', how='left')
+
+    # Save the full scored + metadata output for manual review
+    os.makedirs(out_dir, exist_ok=True)
+    model_output_train.to_csv(os.path.join(out_dir, f"{assay}_{version}_train_scored.csv"), index=True)
+    model_output_test.to_csv( os.path.join(out_dir, f"{assay}_{version}_test_scored.csv"),  index=True)
+    logging.info(f"[{assay}] Scored outputs with metadata saved to {out_dir}")
+
+    print(model_output_train)
+    return model_output_train, model_output_test
  
 # ── Entry point ───────────────────────────────────────────────────────────────
  
 if __name__ == "__main__":
-    X_train_haem, X_test_haem, train_meta_haem, test_meta_haem = run_preprocessing(config.SUMMARY_QC_METRICS, 'haem', out_dir=None)
-    X_train_ST, X_test_ST, train_meta_ST, test_meta_ST = run_preprocessing(config.SUMMARY_QC_METRICS, 'ST', out_dir=None)
 
-    run_model_train(X_train_haem, X_test_haem, train_meta_haem, test_meta_haem, 'haem', 0.05, os.path.join('models/trained', 'haem'))
-    run_model_train(X_train_ST, X_test_ST, train_meta_ST, test_meta_ST, 'ST', 0.20, os.path.join('models/trained', 'ST'))
+    parser = argparse.ArgumentParser(
+        description='Settings for training the Isolation Model'
+    )
+
+    parser.add_argument(
+        "--assay",
+        choices=["st", "haem"],
+        required=True,
+        help='Assay to train model: "st" or "haem"'
+    )
+
+    parser.add_argument(
+        "--version",
+        choices=["v2", "v3", "v2_v3"],
+        help="Capture version to train the model: 'v2', 'v3', or 'v2_v3'"
+    )
+
+    args = parser.parse_args()
+    out_dir = os.path.join(config.PREPROCESSING_OUTDIR,
+                           args.assay
+                           )
+
+
+    X_train, X_test, train_meta, test_meta = run_preprocessing(config.SUMMARY_QC_METRICS, args.assay, out_dir=None, version=args.version)
+
+    explained_model_train, explained_model_test = run_model_train(X_train, X_test, train_meta, test_meta, args.assay, args.version, 0.05, os.path.join('models/trained', args.assay ))
+
+    #plot_score_distribution(X_train, X_test_scored, args.assay, os.path.join('outputs/graphs/train', args.assay, args.version))
+
+    flagging_rate = {
+        'st_train':{'n_total': 2532,
+              'n_flagged': 507},
+        'st_test':{'n_total': 633,
+              'n_flagged': 128}, 
+        'haem_train':{'n_total': 1362,
+                      'n_flagged': 69},
+        'haem_test':{'n_total':  341,
+                'n_flagged': 17}
+    }
+
+    #plot_flagging_rates(flagging_rate, 'outputs/graphs/train/')
+
+    #plot_top_deviant_features(X_train_scored_explained, 'haem_train', 'outputs/graphs/train/haem/', 10)
+    #plot_top_deviant_features(X_test_scored_explained, 'haem_test', 'outputs/graphs/train/haem/', 10)
+
+    #plot_top_deviant_features(X_train_scored_explained, 'st_train', 'outputs/graphs/train/st/', 10)
+    #plot_top_deviant_features(X_test_scored_explained, 'st_test', 'outputs/graphs/train/st/', 10)

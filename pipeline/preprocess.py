@@ -247,6 +247,94 @@ def fix_data_types(data_frame):
     df['picard_fold80'] = pd.to_numeric(df["picard_fold80"].replace("?", np.nan))
     return df
 
+
+def separate_data(df: pd.DataFrame, assay_type: str, version: str) -> pd.DataFrame:
+    """
+    Filter the QC dataset to the current production assay.
+
+    ST:
+        NovaSeq X + solid_tumour_v3
+
+    Haem:
+        NovaSeq X + haem_v3
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Cleaned QC dataframe.
+
+    assay_type : str
+        Either "ST" or "haem".
+
+    version : str
+        Either v2, v3 or v2_v3 for both 
+
+    Returns
+    -------
+    pd.DataFrame
+        Dataframe containing only the requested assay.
+    """
+
+    assay_type = assay_type.lower()
+
+    if assay_type == "st" and version == "v3":
+        filtered_df = df[
+            (df["sequencer"].str.lower() == "novaseqx") &
+            (df["cancer_type"].str.lower() == "solid_tumour_v3")
+        ].copy()
+
+    elif assay_type == "haem" and version == "v3":
+        filtered_df = df[
+            (df["sequencer"].str.lower() == "novaseqx") &
+            (df["cancer_type"].str.lower() == "haem_v3")
+        ].copy()
+
+    elif assay_type == "st" and version == "v2":
+        filtered_df = df[
+                    (df["sequencer"].str.lower() == "novaseqx") &
+                    (df["cancer_type"].str.lower() == "solid_tumour")
+                ].copy()
+
+    elif assay_type == "haem" and version == "v2":
+        filtered_df = df[
+                    (df["sequencer"].str.lower() == "novaseqx") &
+                    (df["cancer_type"].str.lower() == "haem_v2")
+                ].copy()
+
+    elif assay_type == "st" and version == "v2_v3":
+        filtered_df = df[
+                    (df["sequencer"].str.lower() == "novaseqx") &
+                    (df["cancer_type"].str.lower().isin(["solid_tumour", "solid_tumour_v3"]))
+                ].copy()
+
+    elif assay_type == "haem" and version == "v2_v3":
+        filtered_df = df[
+                    (df["sequencer"].str.lower() == "novaseqx") &
+                    (df["cancer_type"].str.lower().isin(["haem_v2", "haem_v3"]))
+                ].copy()
+
+    else:
+        raise ValueError(
+            f"Unknown assay_type '{assay_type}'. "
+            "Expected 'ST' or 'haem'."
+        )
+
+    logging.info(
+        f"Filtering for {assay_type.upper()} assay: "
+        f"{len(filtered_df)} samples retained"
+    )
+
+    logging.info(
+        f"Sequencers:\n{filtered_df['sequencer'].value_counts().to_string()}"
+    )
+
+    logging.info(
+        f"Cancer/pipeline versions:\n"
+        f"{filtered_df['cancer_type'].value_counts().to_string()}"
+    )
+    return filtered_df
+
+
 def split_test_train(data_frame): # First iteration is using all the data without separating out the sequencer or cancertype 
     """ 
     This function splits the data into the test and training set.
@@ -509,67 +597,10 @@ def find_correlated_features(X_train, threshold=0.95):
 
     return pd.DataFrame(correlated_pairs)
 
-def separate_data(df: pd.DataFrame, assay_type: str) -> pd.DataFrame:
-    """
-    Filter the QC dataset to the current production assay.
 
-    ST:
-        NovaSeq X + solid_tumour_v3
-
-    Haem:
-        NovaSeq X + haem_v3
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        Cleaned QC dataframe.
-
-    assay_type : str
-        Either "ST" or "haem".
-
-    Returns
-    -------
-    pd.DataFrame
-        Dataframe containing only the requested assay.
-    """
-
-    assay_type = assay_type.lower()
-
-    if assay_type == "st":
-        filtered_df = df[
-            (df["sequencer"].str.lower() == "novaseqx") &
-            (df["cancer_type"].str.lower() == "solid_tumour_v3")
-        ].copy()
-
-    elif assay_type == "haem":
-        filtered_df = df[
-            (df["sequencer"].str.lower() == "novaseqx") &
-            (df["cancer_type"].str.lower() == "haem_v3")
-        ].copy()
-
-    else:
-        raise ValueError(
-            f"Unknown assay_type '{assay_type}'. "
-            "Expected 'ST' or 'haem'."
-        )
-
-    logging.info(
-        f"Filtering for {assay_type.upper()} assay: "
-        f"{len(filtered_df)} samples retained"
-    )
-
-    logging.info(
-        f"Sequencers:\n{filtered_df['sequencer'].value_counts().to_string()}"
-    )
-
-    logging.info(
-        f"Cancer/pipeline versions:\n"
-        f"{filtered_df['cancer_type'].value_counts().to_string()}"
-    )
-    return filtered_df
 
 # Run preprocessing 
-def run_preprocessing(file_path: str, assay_type: str, out_dir: None):
+def run_preprocessing(file_path: str, assay_type: str, out_dir: None, version):
 
     # Load the input
     df = load_data(file_path)
@@ -586,10 +617,9 @@ def run_preprocessing(file_path: str, assay_type: str, out_dir: None):
     # Filter to the requested production assay
     df = separate_data(
         df,
-        assay_type=assay_type
+        assay_type=assay_type,
+        version=version
     )
-
-    df.to_csv(os.path.join('data/processed/separated_data'+ '_' + assay_type + '(4).csv'), sep='\t')
 
     if len(df) < 10:
         raise ValueError(
@@ -601,8 +631,8 @@ def run_preprocessing(file_path: str, assay_type: str, out_dir: None):
     train_df, test_df = split_test_train(df)
 
     # Isolate the metadata to save 
-    train_meta = train_df[["sample_name", "cancer_type", "sequencer", "assay_type"]].copy()  # keep assay label for per-assay plots later
-    test_meta  = test_df[["sample_name", "cancer_type", "sequencer", "assay_type"]].copy()
+    train_meta = train_df[["sample_name", "cancer_type", "sequencer", "assay_type", "worklist"]].copy()  # keep assay label for per-assay plots later
+    test_meta  = test_df[["sample_name", "cancer_type", "sequencer", "assay_type", "worklist"]].copy()
 
     # Encode the catergorical values 
     # Fit on train only
@@ -685,9 +715,16 @@ if __name__ == "__main__":
 
     parser.add_argument(
         "--assay",
-        choices=["ST", "haem"],
+        choices=["st", "haem"],
         required=True,
         help="Assay to preprocess: ST or haem"
+    )
+
+    parser.add_argument(
+        "--version",
+        choices=["v2", "v3", "v2_v3"],
+        required=True,
+        help="Capture version for preprocess: v2, v3 or v2_v3"
     )
 
     args = parser.parse_args()
@@ -700,7 +737,8 @@ if __name__ == "__main__":
     X_train, X_test, train_meta, test_meta = run_preprocessing(
         file_path=config.SUMMARY_QC_METRICS,
         assay_type=args.assay,
-        out_dir=output_dir
+        out_dir=output_dir,
+        version=args.version
     )
 
     logging.info(
@@ -708,9 +746,9 @@ if __name__ == "__main__":
     )
 
     print(
-        f"Training samples: {len(X_train)}"
+        f"Training samples: {len(X_train)}, meta data: {len(train_meta)}"
     )
 
     print(
-        f"Testing samples: {len(X_test)}"
+        f"Testing samples: {len(X_test)}, meta data: {len(train_meta)}"
     )
