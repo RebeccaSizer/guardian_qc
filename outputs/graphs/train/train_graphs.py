@@ -149,8 +149,6 @@ def plot_top_deviant_features(
     logging.info(f"[{assay}] Top deviant features plot saved to {out_path}")
  
  
-# ── 6. Evaluate — with labels (optional) ─────────────────────────────────────
- 
 def evaluate_with_labels(
     X_scored: pd.DataFrame,
     labels: pd.Series,
@@ -214,6 +212,3 @@ def evaluate_with_labels(
     logging.info(f"[{assay}] PR curve saved to {out_path}")
  
     return {"auprc": auprc, "n_labelled": len(labels)}
-
-
- 

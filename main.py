@@ -12,8 +12,8 @@ from pipeline.ingest import (
     sample_level_qc,
 )
 from pipeline.preprocess import run_preprocessing
-from pipeline.train import run_model_train
-from pipeline.evaluate import quality_metirc_flag_success
+from pipeline.train import run_model_train, load_model
+from pipeline.evaluate import quality_metric_flag_success
 from utils.logger import logging
 
 
@@ -149,7 +149,7 @@ def run_train_and_evaluate(
 
     truth_set = get_truth_set(assay)
 
-    results = quality_metirc_flag_success(
+    results = quality_metric_flag_success(
         explained_model_test,
         truth_set,
         assay,
@@ -252,7 +252,10 @@ if __name__ == "__main__":
 
     elif args.step == "evaluate":
 
-        # You need to load your previously trained model/results here.
+        scored_file = os.path.join('models/trained', args.assay, f"{args.assay}_{args.version}_test_scored.csv")
+        truth_set = get_truth_set('data/raw/', args.assay)
+        quality_metric_flag_success(scored_file, truth_set, args.assay, args.version, 'test')
+
         # This depends on how run_model_train saves its output.
         raise NotImplementedError(
             "Add model loading here for the evaluate-only step."
