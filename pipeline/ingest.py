@@ -274,7 +274,7 @@ def get_run_file_paths():
         return pd.DataFrame()
 
 
-def get_run_sample_file_paths(df_run_metrics, df_sample_metrics):
+def get_run_sample_file_paths(df_run_metrics, df_sample_metrics): # Merge the two data frames (All details in one place)
     """
     Merge the run_summary_file_paths and qc_summary_file_paths dataframes
     on the seq_run_number column and return a merged dataframe with the following columns:

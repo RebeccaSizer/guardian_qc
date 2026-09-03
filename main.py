@@ -1,6 +1,6 @@
 import argparse
 import os
-
+import pandas as pd
 import config
 
 from pipeline.ingest import (
@@ -13,7 +13,7 @@ from pipeline.ingest import (
 )
 from pipeline.preprocess import run_preprocessing
 from pipeline.train import run_model_train, load_model
-from pipeline.evaluate import quality_metric_flag_success
+from pipeline.evaluate import quality_metric_flag_success, get_truth_set
 from utils.logger import logging
 
 
@@ -86,35 +86,6 @@ def run_preprocess(assay: str, version: str):
     logging.info(f"Test samples: {len(X_test)}")
 
     return X_train, X_test, train_meta, test_meta
-
-
-def get_truth_set(assay: str):
-    """Load the known failed sample names for the selected assay."""
-
-    if assay == "haem":
-        truth_file = "data/raw/qc_fail_haem.tsv"
-
-    elif assay == "st":
-        truth_file = "data/raw/qc_fail_ST.tsv"
-
-    else:
-        raise ValueError(f"Unknown assay: {assay}")
-
-    truth_set = []
-
-    with open(truth_file, "r") as qc_fail:
-        for line in qc_fail:
-            line = line.strip()
-
-            if line:
-                truth_set.append(line)
-
-    logging.info(
-        f"Loaded {len(truth_set)} known failed samples "
-        f"from {truth_file}"
-    )
-
-    return truth_set
 
 
 def run_train_and_evaluate(
@@ -197,22 +168,20 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
-        "--contamination",
-        type=float,
-        default=0.05,
-        help=(
-            "Expected proportion of outliers for the Isolation Forest. "
-            "Default: 0.05"
-        ),
+        "--split",
+        choices=["train", "test"],
+        required=False,
+        help='Split used for evaluation: Train or Test"',
     )
 
     args = parser.parse_args()
 
     # Validate contamination
-    if not 0 < args.contamination <= 0.5:
-        parser.error(
-            "--contamination must be greater than 0 and no greater than 0.5"
-        )
+    if args.assay == 'haem':
+        contamination = 0.08
+    
+    elif args.assay == 'ST':
+        contamination = 0.15
 
     if args.step == "ingest":
 
@@ -246,20 +215,21 @@ if __name__ == "__main__":
             test_meta,
             args.assay,
             args.version,
-            args.contamination,
+            contamination,
             model_output_dir,
         )
 
     elif args.step == "evaluate":
+        if args.split == False:
+            split = 'test'
+        else:
+            split = args.split
 
         scored_file = os.path.join('models/trained', args.assay, f"{args.assay}_{args.version}_test_scored.csv")
+        scored_df = pd.read_csv(scored_file)
         truth_set = get_truth_set('data/raw/', args.assay)
-        quality_metric_flag_success(scored_file, truth_set, args.assay, args.version, 'test')
+        quality_metric_flag_success(scored_df, truth_set, args.assay, args.version, split)
 
-        # This depends on how run_model_train saves its output.
-        raise NotImplementedError(
-            "Add model loading here for the evaluate-only step."
-        )
 
     elif args.step == "all":
 
@@ -268,13 +238,13 @@ if __name__ == "__main__":
         results = run_train_and_evaluate(
             args.assay,
             args.version,
-            args.contamination,
+            contamination,
         )
 
         logging.info(
             f"Pipeline complete: "
             f"{args.assay} {args.version} "
-            f"contamination={args.contamination}"
+            f"contamination={contamination}"
         )
 
         logging.info(f"Evaluation results: {results}")

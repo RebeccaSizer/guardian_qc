@@ -111,12 +111,18 @@ Functions
 load_data()
     Load QC summary data from a tab-separated file.
 
+explore_qc_data()
+    Explores the raw qc metrics for missing, duplicate or incorrect values
+
 remove_duplicates()
     Remove duplicate observations based on sample information.
 
 fix_data_types()
     Convert QC metrics to appropriate numerical data types and create
     assay identifiers from sequencing and cancer-type information.
+    
+separate_data()
+    Separates data based on Assay type and capture version
 
 split_test_train()
     Split the input dataset into training and test sets, using stratification
@@ -140,6 +146,15 @@ fit_standard_scaler()
 apply_standard_scaler()
     Apply a fitted StandardScaler to a DataFrame.
 
+fit_robust_scaler()
+    Fit a RobustScaler using training data.
+
+apply_robust_scaler()
+    Apply a fitted RobustScaler to a DataFrame.
+
+save_transformers()
+    Save fitted preprocessing transformers to disk using joblib.
+
 fit_variance_threshold()
     Fit a VarianceThreshold feature selector.
 
@@ -149,9 +164,6 @@ apply_variance_threshold()
 find_correlated_features()
     Identify pairs of highly correlated features above a specified
     correlation threshold.
-
-save_transformers()
-    Save fitted preprocessing transformers to disk using joblib.
 
 run_preprocessing()
     Run the complete preprocessing workflow and return the processed
@@ -572,7 +584,18 @@ def apply_variance_threshold(df: pd.DataFrame, vt: VarianceThreshold) -> pd.Data
 
 # Find and Remove highly correlated pairs of data to prevent overweighting 
 def find_correlated_features(X_train, threshold=0.95):
-
+    """
+    This function finds qc metrics that are highly correlated.
+    Removing highly correlated features prevents over weighting those features.
+    
+    params:
+        X_train: dataframe of the training data
+        threshold: threshold for correlation
+    
+    output: 
+        dataframe of correlated pairs
+    """
+    
     corr_matrix = X_train.corr().abs()
 
     upper = corr_matrix.where(
@@ -601,7 +624,28 @@ def find_correlated_features(X_train, threshold=0.95):
 
 # Run preprocessing 
 def run_preprocessing(file_path: str, assay_type: str, out_dir: None, version):
-
+    """
+    This function strings together all of the preprocessing steps
+    to prepare the data for training the machine learning model.
+    Preprocessing steps include removing duplicates,
+    fixing data types, separate data by assay and version, split into 
+    test and train, fit and apply a one-hot encoder, fit and apply as
+    imputer, fit and apply a scaler, apply variance threshold to rmove metrics 
+    with no variation, find and drop correlated features 
+    
+    params:
+        file_path: path to the qc_summary metrics file 
+        assay_type: haem or st
+        out_dir: where to save the transformers if not None
+        version: capture version
+    
+    output:
+        X_train: The train split that has been preprocessed 
+        X_test: The test split that has been preprocessed
+        train_meta: Meta data associated with the training dataset
+        test_meta: Meta data associated with the test dataset 
+    """
+    
     # Load the input
     df = load_data(file_path)
 

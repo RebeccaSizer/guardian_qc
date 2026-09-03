@@ -2,15 +2,12 @@
 evaluate the IsolationForest model I have built """
 import pandas as pd
 import config
-from pipeline.train import run_model_train
+from pipeline.train_composite import run_model_train
 from pipeline.preprocess import run_preprocessing
 import argparse
 import os
 from utils.logger import logging 
 from pathlib import Path
-
-import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
 
 def quality_metric_flag_success(scored: pd.DataFrame, truth_set: list, assay: str, version: str, split: str):
     """
@@ -120,31 +117,20 @@ if __name__=="__main__":
 
     X_train, X_test, train_meta, test_meta = run_preprocessing(config.SUMMARY_QC_METRICS, args.assay, out_dir=None, version=args.version)
 
-    contamination = [0.01, 0.03, 0.05, 0.08, 0.1, 0.15, 0.2, 0.25]
-    all_results = {}
-    for i in contamination:
-        explained_model_train, explained_model_test = run_model_train(X_train, X_test, train_meta, test_meta, args.assay, args.version, i, os.path.join('models/trained', args.assay ))
+    if args.assay == 'haem':
+        contamination = 0.08
+    elif args.assay == 'ST':
+        contamination = 0.25
+    
+    explained_model_train, explained_model_test = run_model_train(X_train, X_test, train_meta, test_meta, args.assay, args.version, contamination, os.path.join('models/trained', args.assay ))
 
-        truth_set = get_truth_set('data/raw/', args.assay)
+    truth_set = get_truth_set('data/raw/', args.assay)
 
-        if args.split == 'train':
-            scored_explained = explained_model_train.copy()
-        elif args.split == 'test':
-            scored_explained = explained_model_test.copy()
+    if args.split == 'train':
+        scored_explained = explained_model_train.copy()
+    elif args.split == 'test':
+        scored_explained = explained_model_test.copy()
 
-        returned_analysis = quality_metric_flag_success(scored_explained, truth_set, args.assay, args.version, args.split)
+    returned_analysis = quality_metric_flag_success(scored_explained, truth_set, args.assay, args.version, args.split)
 
-        
-        all_results[i] = returned_analysis
-
-    results_df = pd.DataFrame.from_dict(
-    all_results,
-    orient="index"
-    )
-
-    results_df.to_csv(os.path.join("outputs/evaluation/", f"{args.assay}_{args.version}_{args.split}.csv"))
-
-
-    results_df.index.name = "contamination"
-
-    print(results_df)
+    print(returned_analysis)
