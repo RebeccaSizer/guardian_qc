@@ -12,7 +12,7 @@ from pipeline.ingest import (
     sample_level_qc,
 )
 from pipeline.preprocess import run_preprocessing
-from pipeline.train import run_model_train, load_model
+from pipeline.train_composite import run_model_train, load_model
 from pipeline.evaluate import quality_metric_flag_success, get_truth_set
 from utils.logger import logging
 
