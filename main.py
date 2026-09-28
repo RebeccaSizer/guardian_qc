@@ -91,6 +91,7 @@ def run_preprocess(assay: str, version: str):
 def run_train_and_evaluate(
     assay: str,
     version: str,
+    split: str,
     contamination: float,
 ):
     """Run preprocessing, model training and evaluation."""
@@ -114,11 +115,12 @@ def run_train_and_evaluate(
         test_meta,
         assay,
         version,
+        split,
         contamination,
         model_output_dir,
     )
 
-    truth_set = get_truth_set(assay)
+    truth_set = get_truth_set(os.path.join("data/raw"), assay)
 
     results = quality_metric_flag_success(
         explained_model_test,
@@ -180,7 +182,7 @@ if __name__ == "__main__":
     if args.assay == 'haem':
         contamination = 0.08
     
-    elif args.assay == 'ST':
+    elif args.assay == 'st':
         contamination = 0.15
 
     if args.step == "ingest":
@@ -215,6 +217,7 @@ if __name__ == "__main__":
             test_meta,
             args.assay,
             args.version,
+            args.split,
             contamination,
             model_output_dir,
         )
@@ -238,6 +241,7 @@ if __name__ == "__main__":
         results = run_train_and_evaluate(
             args.assay,
             args.version,
+            args.split,
             contamination,
         )
 

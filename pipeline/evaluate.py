@@ -122,7 +122,7 @@ if __name__=="__main__":
     elif args.assay == 'ST':
         contamination = 0.25
     
-    explained_model_train, explained_model_test = run_model_train(X_train, X_test, train_meta, test_meta, args.assay, args.version, contamination, os.path.join('models/trained', args.assay ))
+    explained_model_train, explained_model_test = run_model_train(X_train, X_test, train_meta, test_meta, args.assay, args.version, args.split, contamination, os.path.join('models/trained', args.assay ))
 
     truth_set = get_truth_set('data/raw/', args.assay)
 
