@@ -64,16 +64,14 @@ from utils.logger import logging
 from qc.inter_op import inter_op_qc
 import config
 from pathlib import Path
-
-# Import pandas for data manipulation
 import pandas as pd
 
 
 # This function gets the sample name from the file path 
 def get_qc_summary_file_path():
     """
-    Gather all file paths to qc_summary files for 
-    both the NovaSeqX and NovaSeq6000 platforms.
+    Gather all file paths to sample qc_summary files for 
+    both the NovaSeqX and NovaSeq6000 platforms for Heam and ST.
 
     params:
         None
@@ -102,7 +100,7 @@ def get_qc_summary_file_path():
             if not run.is_dir():
                 continue
 
-            elif config.RUN_PATTERN_NOVASEQX.match(run.name):
+            elif config.RUN_PATTERN_NOVASEQX.match(run.name): # Get name attribute of the run path (the final folder)
                 sequencer = "novaseqx"
             elif config.RUN_PATTERN_NOVASEQ6000.match(run.name):
                 sequencer = "novaseq6000"
@@ -119,6 +117,7 @@ def get_qc_summary_file_path():
                     for file_path in worklist_dir.iterdir():
 
                         if not file_path.name.startswith(worklist):
+                            logging.info(f'Skipping folder at file path {file_path} due to mismatch between worklist folder and file name')
                             continue
                             # Skip files that don't start with the worklist number
 
@@ -159,7 +158,7 @@ def get_qc_summary_file_path():
 
 
 
-#this function gets the sample name from the file path 
+# This function gets the sample name from the file path 
 def get_run_file_paths():
     """
     Gather all file paths to run folders 
@@ -169,7 +168,11 @@ def get_run_file_paths():
 
     output:
         df
-            contains sequence run folder and File paths 
+            contains:
+                - Sequence run number
+                - Run qulaity file path 
+                - Sample sheet file path
+                - Lane
     
     Examples:
         get_run_file_paths()
@@ -184,8 +187,7 @@ def get_run_file_paths():
             None
 
         output:
-            df
-                contains sequence run folder and File paths 
+            Returns Integer List of lane values, or None if not available  
         
         Examples:
             helper_get_lane()
@@ -232,7 +234,7 @@ def get_run_file_paths():
 
                         run_info["sample_sheet_path"] = str(file)
 
-                        lane_info = helper_get_lane(file)
+                        lane_info = helper_get_lane(file) # Need Lane information for NovaSeqX as can be 1,2 or both
                         run_info["lane"] = lane_info
                         break  # assuming only one sample sheet per run
 
@@ -245,7 +247,7 @@ def get_run_file_paths():
                     "seq_run_number": run.name,
                     "run_qual_filepath": str(run),
                     "sample_sheet_path": "No sample sheet found",
-                    "lane" : None
+                    "lane" : None # Lane information not needed for NovaSeq6000 as only 8 lane option. 
                 }
 
                 for file in run.iterdir():
@@ -274,7 +276,8 @@ def get_run_file_paths():
         return pd.DataFrame()
 
 
-def get_run_sample_file_paths(df_run_metrics, df_sample_metrics): # Merge the two data frames (All details in one place)
+# Merge the two data frames (All details in one place)
+def get_run_sample_file_paths(df_run_metrics, df_sample_metrics): 
     """
     Merge the run_summary_file_paths and qc_summary_file_paths dataframes
     on the seq_run_number column and return a merged dataframe with the following columns:
@@ -288,7 +291,7 @@ def get_run_sample_file_paths(df_run_metrics, df_sample_metrics): # Merge the tw
         - file_status
 
         params:
-            df_run_metrics: DataFrame containing run_summary_file_paths
+            df_run_metrics: DataFrame containing run_summary_file_paths, 
             df_sample_metrics: DataFrame containing qc_summary_file_paths
             
         output:
@@ -296,46 +299,64 @@ def get_run_sample_file_paths(df_run_metrics, df_sample_metrics): # Merge the tw
             
         """
 
-    df_merged = df_run_metrics.merge(df_sample_metrics,
-                                     on = "seq_run_number",
-                                     how = "left")
     
-
     def check_both_files_present(row):
+        """
+        This function adds an additional column to indicate if all necassary files are present
+        
+        params:
+            dataframe with columns run_qual_filepath and qc_file_path
+            
+        output:
+            string Yes, Run QC metrics only, Sample QC metrics only, or No QC data"""
 
-        run = pd.notna(row["run_qual_filepath"])
-        sample = pd.notna(row["qc_file_path"])
+        try:
+            run = pd.notna(row["run_qual_filepath"])
+            sample = pd.notna(row["qc_file_path"])
 
-        if run and sample:
-            return "Yes"
-        elif run:
-            return "Run QC metrics only"
-        elif sample:
-            return "Sample QC metrics only"
-        else:
-            return "No QC data"
+            if run and sample:
+                return "Yes"
+            elif run:
+                return "Run QC metrics only"
+            elif sample:
+                return "Sample QC metrics only"
+            else:
+                return "No QC data"
 
-    df_merged["file_status"] = df_merged.apply(
-        check_both_files_present, 
-        axis = 1)
-    
-    df_merged.to_csv(config.QC_FILE_PATHS, sep='\t', header=True, index=False)
+        except KeyError as e:
+            logging.error(f"Missing required column {e}")
 
-    counts = (
-        df_merged.groupby(["sequencer", "cancer_type"])
-        .size()
-        .reset_index(name="count")
-    )
+    try:
+        df_merged = df_run_metrics.merge(df_sample_metrics,
+                                        on = "seq_run_number",
+                                        how = "left")
 
-    logging.info(
-        f"Counts of complete and incomplete data sets: "
-        f"{df_merged['file_status'].value_counts()}" \
-        "\nCounts of data by sequencer and cancer type:" \
-        f"{counts}"
-    )
-    
-    return df_merged 
+        df_merged["file_status"] = df_merged.apply(
+            check_both_files_present, 
+            axis = 1)
+        
+        df_merged.to_csv(config.QC_FILE_PATHS, sep='\t', header=True, index=False)
 
+        counts = (
+            df_merged.groupby(["sequencer", "cancer_type"])
+            .size()
+            .reset_index(name="count")
+        )
+
+        logging.info(
+            f"Counts of complete and incomplete data sets: "
+            f"{df_merged['file_status'].value_counts()}" \
+            "\nCounts of data by sequencer and cancer type:" \
+            f"{counts}"
+        )
+        
+        return df_merged 
+
+    except KeyError as e:
+        logging.error(f"Merge failed due to missing key: {e}")
+
+
+# Filter the dataframe to only include samples that have both run, sample paths and lane information
 def filter_df(merged_dataframe):
     """
     Filter the merged dataframe to include only rows where:
@@ -351,30 +372,35 @@ def filter_df(merged_dataframe):
 
     pass_filter = []
 
-    for _, row in merged_dataframe.iterrows():
+    try:
 
-        lane = row["lane"]
+        for _, row in merged_dataframe.iterrows():
 
-        # Check that lane is present
-        if lane is None:
-            lane_present = False
-        elif isinstance(lane, float) and pd.isna(lane):
-            lane_present = False
-        elif isinstance(lane, list):
-            lane_present = len(lane) > 0
-        else:
-            lane_present = True
+            lane = row["lane"]
 
-        if row["file_status"] == "Yes" and lane_present:
-            pass_filter.append(row)
+            # Check that lane is present
+            if lane is None:
+                lane_present = False
+            elif isinstance(lane, float) and pd.isna(lane):
+                lane_present = False
+            elif isinstance(lane, list):
+                lane_present = len(lane) > 0
+            else:
+                lane_present = True
 
-        else:
-            continue
+            if row["file_status"] == "Yes" and lane_present:
+                pass_filter.append(row)
 
-    filtered_df = pd.DataFrame(pass_filter)
-    logging.info(f"Filtered dataframe contains {len(filtered_df)} rows after applying QC and lane filters.")
+            else:
+                continue
 
-    return filtered_df
+        filtered_df = pd.DataFrame(pass_filter)
+        logging.info(f"Filtered dataframe contains {len(filtered_df)} rows after applying QC and lane filters.")
+    
+        return filtered_df
+
+    except KeyError as e:
+        logging.error(f"Missing columns: {e}")
 
 def filter_run_qc(df):
     """
@@ -397,61 +423,68 @@ def filter_run_qc(df):
 
     pass_list = []
 
-    for _, row in df.drop_duplicates("seq_run_number").iterrows():
+    try:
 
-        run_folder_path = row["run_qual_filepath"]
-        run_folder_name = Path(run_folder_path).name
+        for _, row in df.drop_duplicates("seq_run_number").iterrows():
 
-        run_df = inter_op_qc(run_folder_path)
+            run_folder_path = row["run_qual_filepath"]
+            run_folder_name = Path(run_folder_path).name
 
-        if pd.notna(row["sequencer"]) and "novaseqx" in row["sequencer"].lower():
-            # Select the correct row of the InterOp summary
-            lane = row["lane"]
+            run_df = inter_op_qc(run_folder_path)
 
-            if lane == [1]:
-                run_columns = run_df.loc[0]
-            elif lane == [2]:
-                run_columns = run_df.loc[1]
-            elif lane == [1, 2]:
-                run_columns = run_df.loc[2]
-            elif lane is None:
-                logging.warning(f"Lane information is missing for run {run_folder_name}. Skipping this run.")
-                continue
+            # Get Lane information to select correct values from the run_qc pulled using interop
+            if pd.notna(row["sequencer"]) and "novaseqx" in row["sequencer"].lower():
+                
+                # Select the correct row of the InterOp summary
+                lane = row["lane"]
+
+                if lane == [1]:
+                    run_columns = run_df.loc[0]
+                elif lane == [2]:
+                    run_columns = run_df.loc[1]
+                elif lane == [1, 2]:
+                    run_columns = run_df.loc[2]
+                elif lane is None:
+                    logging.warning(f"Lane information is missing for run {run_folder_name}. Skipping this run.")
+                    continue
+                else:
+                    raise ValueError(f"Unexpected lane value: {lane}")
+
+            elif pd.notna(row["sequencer"]) and "novaseq6000" in row["sequencer"].lower():
+                index = run_df.index[run_df["Lane"] == "Full Run"][0]
+                run_columns = run_df.loc[index]
+
             else:
-                raise ValueError(f"Unexpected lane value: {lane}")
+                raise ValueError(f"Unexpected sequencer type: {row['sequencer']}")
 
-        elif pd.notna(row["sequencer"]) and "novaseq6000" in row["sequencer"].lower():
-            index = run_df.index[run_df["Lane"] == "Full Run"][0]
-            run_columns = run_df.loc[index]
+            q30 = run_columns["Percent Q30"]
+            error_rate = run_columns["Error Rate"]
 
-        else:
-            raise ValueError(f"Unexpected sequencer type: {row['sequencer']}")
+            if q30 >= 80 and error_rate <= 2 or q30 < 80 and error_rate == "NaN":
+                status = "Yes"
+            elif q30 < 80 and error_rate <= 2:
+                status = "Percent Q30 < 80"
+            elif q30 >= 80 and error_rate > 2:
+                status = "Error rate > 2"
+            else:
+                status = "Percent Q30 < 80 AND Error rate > 2"
 
-        q30 = run_columns["Percent Q30"]
-        error_rate = run_columns["Error Rate"]
+            pass_list.append({
+                "seq_run_number": run_folder_name,
+                "pass_run_qc": status
+            })
 
-        if q30 >= 80 and error_rate <= 2 or q30 < 80 and error_rate == "NaN":
-            status = "Yes"
-        elif q30 < 80 and error_rate <= 2:
-            status = "Percent Q30 < 80"
-        elif q30 >= 80 and error_rate > 2:
-            status = "Error rate > 2"
-        else:
-            status = "Percent Q30 < 80 AND Error rate > 2"
+            df_pass = df.merge(pd.DataFrame(pass_list), 
+                            how="left", 
+                            left_on="seq_run_number", 
+                            right_on="seq_run_number")
 
-        pass_list.append({
-            "seq_run_number": run_folder_name,
-            "pass_run_qc": status
-        })
+        logging.info(df_pass["pass_run_qc"].value_counts())
 
-        df_pass = df.merge(pd.DataFrame(pass_list), 
-                           how="left", 
-                           left_on="seq_run_number", 
-                           right_on="seq_run_number")
+        return df_pass 
 
-    logging.info(df_pass["pass_run_qc"].value_counts())
-
-    return df_pass 
+    except KeyError as e:
+        logging.error(f"Missing column: {e}")
 
 
 def sample_level_qc(df):
@@ -527,28 +560,77 @@ def sample_level_qc(df):
     
     summary_qc_metrics = []
 
-    for _, row in df.iterrows():
+    try:
+        for _, row in df.iterrows():
 
-        if row["pass_run_qc"] == "Yes":
+            if row["pass_run_qc"] == "Yes":
 
-            summary_qc_file_path = row["qc_file_path"]
-            sample_qc = extract_values_from_qc_summary(summary_qc_file_path)
+                summary_qc_file_path = row["qc_file_path"]
+                sample_qc = extract_values_from_qc_summary(summary_qc_file_path)
 
-            for sample in sample_qc:
+                for sample in sample_qc:
 
-                sample["sequencer"] = row["sequencer"]
-                sample["cancer_type"] = row["cancer_type"]
-                sample['worklist'] = row['worklist']
-                sample['assay_type'] = row['sequencer'] + '_' + row['cancer_type']
-                summary_qc_metrics.append(sample)
+                    sample["sequencer"] = row["sequencer"]
+                    sample["cancer_type"] = row["cancer_type"]
+                    sample['worklist'] = row['worklist']
+                    sample['assay_type'] = row['sequencer'] + '_' + row['cancer_type']
+                    summary_qc_metrics.append(sample)
 
-    summary_qc_metrics_df = pd.DataFrame(summary_qc_metrics)
+        summary_qc_metrics_df = pd.DataFrame(summary_qc_metrics)
 
-    return summary_qc_metrics_df
+        return summary_qc_metrics_df
+
+    except KeyError as e:
+        logging.error(f"Missing column: {e}")
 
 
-#test functions in script
-if __name__ == "__main__":
+# Ingest data using above functions
+def ingest_data():
+    """
+    This function produces a dataframe containing all of the sample level quality metrics
+    pulled from any run which passed run level qc. Metrics pulled through include:
+
+    - bcftools metrics
+        bcftools_ts — Number of transitions (e.g. A↔G or C↔T) identified in the variant calls.
+        bcftools_tv — Number of transversions (e.g. A↔C, A↔T, C↔G, etc.) identified in the variant calls.
+        bcftools_tstv — Transition-to-transversion (Ti/Tv) ratio. This can provide an indication of variant call quality and composition.
+        bcftools_variants — Total number of variants identified in the sample.
+        bcftools_snvs — Number of single-nucleotide variants (SNVs) identified.
+        bcftools_indels — Number of insertions and deletions (indels) identified.
+    - Picards metrics
+        picard_mode_insert — Most common insert size observed in the sequencing reads.
+        picard_mean_insert — Mean insert size across the sequencing reads.
+        picard_median_insert — Median insert size across the sequencing reads.
+        picard_mad_insert — Median absolute deviation (MAD) of insert sizes; indicates how much insert sizes vary around the median.
+        picard_total_reads — Total number of sequencing reads examined.
+        picard_pf_reads — Number of passing-filter (PF) reads, i.e. reads that pass the sequencing platform's quality filter.
+        picard_pf_q30_bases — Proportion/number of PF bases with a Phred quality score ≥30, indicating high base-call quality.
+        picard_read_length — Length of the sequencing reads in base pairs.
+        picard_at_dropout — AT dropout, measuring uneven coverage associated with AT-rich regions.
+        picard_gc_dropout — GC dropout, measuring uneven coverage associated with GC-rich regions.
+        picard_fold_enrichment — Measures how much sequencing coverage is enriched in the target regions compared with the expected/background coverage.
+        picard_fold80 — Fold 80 base penalty; indicates how much additional sequencing would theoretically be required to achieve uniform coverage. Lower values generally indicate more uniform coverage.
+        picard_mean_target_coverage — Average sequencing depth/coverage across the targeted regions.
+        picard_median_target_coverage — Median sequencing depth/coverage across the targeted regions.
+        picard_target_bases_20x — Percentage/proportion of target bases covered by at least 20×.
+        picard_target_bases_30x — Percentage/proportion of target bases covered by at least 30×.
+        picard_target_bases_50x — Percentage/proportion of target bases covered by at least 50×.
+        picard_target_bases_100x — Percentage/proportion of target bases covered by at least 100×.
+    - FastQC metrics
+        fastqc_duplication_rate — Proportion of sequencing reads that are duplicates. High duplication can indicate PCR amplification or low library complexity.
+        fastqc_basic_status — Overall FastQC basic quality status, indicating whether the basic FastQC checks passed or identified potential warnings/failures.
+   - Fastp metrics
+        fastp_duplication_rate — Proportion of reads identified as duplicates by Fastp, providing another measure of library complexity/duplication.
+    
+    params:
+        None
+    
+    output:
+        Dataframe containing sample level qc metrics
+        CSV file of all file paths and samples used
+        CSV of all sample level QC metrics
+    """
+    logging.info(f"Starting ingestion pipeline...")
     df_sample = get_qc_summary_file_path()
     df_run = get_run_file_paths()
 
@@ -563,4 +645,16 @@ if __name__ == "__main__":
     # Extract summary QC metrics
     summary_qc_metrics_df = sample_level_qc(df)
     summary_qc_metrics_df.to_csv(config.SUMMARY_QC_METRICS, sep = "\t", index = False)
-    print(summary_qc_metrics_df)
+
+    logging.info(
+            f"Summary QC metrics written to "
+            f"{config.SUMMARY_QC_METRICS} "
+            f"({len(summary_qc_metrics_df)} rows)"
+        )
+
+    return summary_qc_metrics_df
+
+#test functions in script
+if __name__ == "__main__":
+   df = ingest_data()
+   print(df)
