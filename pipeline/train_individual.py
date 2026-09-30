@@ -73,7 +73,7 @@ TOP_N_FEATURES = 3
  
 # Unsupervised model training
 # Isolation forest
-def fit_isolation_forest(X_train_feature, assay: str, version: str, contamination: float):
+def fit_isolation_forest(X_train, assay: str, version: str, contamination):
     """
     Fit an Isolation Forest on a single assay's preprocessed training data.
    
@@ -100,7 +100,7 @@ def fit_isolation_forest(X_train_feature, assay: str, version: str, contaminatio
         n_jobs=-1 #run jobs in parallel
     )
  
-    model.fit(X_train_feature)
+    model.fit(X_train)
     logging.info(f"Isolation forest fitted for assay: {assay}_{version} | n_samples: {len(X_train)}")
     return model
  
@@ -293,11 +293,7 @@ if __name__ == "__main__":
                            args.assay
                            )
  
-    if args.assay == 'haem':
-        contamination = 0.08
- 
-    elif args.assay == 'st':
-        contamination = 0.15
+    contamination = 'auto'
  
     X_train, X_test, train_meta, test_meta = run_preprocessing(config.SUMMARY_QC_METRICS, args.assay, out_dir=None, version=args.version)
  

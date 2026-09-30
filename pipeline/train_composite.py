@@ -73,7 +73,7 @@ TOP_N_FEATURES = 3
  
 # Unsupervised model training
 # Isolation forest
-def fit_isolation_forest(X_train: pd.DataFrame, assay: str, version: str, contamination: float):
+def fit_isolation_forest(X_train, assay: str, version: str, contamination: float):
     """
     Fit an Isolation Forest on a single assay's preprocessed training data.
    
