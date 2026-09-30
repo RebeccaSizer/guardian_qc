@@ -3,62 +3,11 @@ import os
 import pandas as pd
 import config
 
-from pipeline.ingest import (
-    get_run_file_paths,
-    get_qc_summary_file_path,
-    get_run_sample_file_paths,
-    filter_df,
-    filter_run_qc,
-    sample_level_qc,
-)
+from pipeline.ingest import ingest_data
 from pipeline.preprocess import run_preprocessing
 from pipeline.train_composite import run_model_train, load_model
 from pipeline.evaluate import quality_metric_flag_success, get_truth_set
 from utils.logger import logging
-
-
-def run_ingest():
-    """Run the data ingestion and QC filtering steps."""
-
-    logging.info("Starting ingestion pipeline...")
-
-    df_sample = get_qc_summary_file_path()
-    df_run = get_run_file_paths()
-
-    df = get_run_sample_file_paths(df_run, df_sample)
-
-    df.to_csv(
-        config.QC_FILE_PATHS,
-        sep="\t",
-        index=False,
-    )
-    logging.info(f"File paths written to {config.QC_FILE_PATHS}")
-
-    df = filter_df(df)
-    df = filter_run_qc(df)
-
-    df.to_csv(
-        config.FILTERED_RUN_QC_DATA,
-        sep="\t",
-        index=False,
-    )
-    logging.info(
-        f"Filtered data written to {config.FILTERED_RUN_QC_DATA}"
-    )
-
-    summary_qc_metrics_df = sample_level_qc(df)
-
-    summary_qc_metrics_df.to_csv(
-        config.SUMMARY_QC_METRICS,
-        sep="\t",
-        index=False,
-    )
-
-    logging.info(
-        f"Summary QC metrics written to "
-        f"{config.SUMMARY_QC_METRICS} "
-        f"({len(summary_qc_metrics_df)} rows)"
-    )
 
 
 def run_preprocess(assay: str, version: str):
@@ -187,7 +136,7 @@ if __name__ == "__main__":
 
     if args.step == "ingest":
 
-        run_ingest()
+        ingest_data()
 
     elif args.step == "preprocess":
 

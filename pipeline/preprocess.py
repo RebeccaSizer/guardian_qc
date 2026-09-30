@@ -193,9 +193,15 @@ def load_data(file_path):
         
     output:"""
 
-    summary_qc_df = pd.read_csv(file_path, header=0, sep="\t")
-    logging.info(f"Loaded {summary_qc_df.shape[0]} rows x {summary_qc_df.shape[1]} columns from {file_path}")
-    return summary_qc_df
+    try:
+
+        summary_qc_df = pd.read_csv(file_path, header=0, sep="\t")
+        logging.info(f"Loaded {summary_qc_df.shape[0]} rows x {summary_qc_df.shape[1]} columns from {file_path}")
+        return summary_qc_df
+
+    except FileNotFoundError as e:
+        logging.error(f"Sample QC file not found. Error: {e}")
+        raise
 
 def explore_qc_data(data_frame):
     """
@@ -212,22 +218,29 @@ def explore_qc_data(data_frame):
     output: None
     """
     sep = "=" * 40
-    sep_sub = '-' * 40
-    logging.info(sep)
-    logging.info("DATA SUMMARY")
-    logging.info(sep)
-    logging.info(f"Number of Rows: {data_frame.shape[0]}")
-    logging.info(f"Number of Columns: {data_frame.shape[1]}")
-    logging.info(f"Columns to list:\n {data_frame.columns.tolist()}")
-    logging.info(f"\nSplit by sequencer and cancer type:\n {data_frame[config.STRATIFY_COLUMNS].value_counts()}")
-    logging.info(sep)
-    logging.info("DATA QUALITY ")
-    logging.info(sep)
-    logging.info(f"Duplicte rows: {data_frame.duplicated().sum()} / {data_frame.shape[0]}")
-    logging.info(f"Missing values per column:\n{data_frame.isnull().sum()}")
-    logging.info(f"Dtypes:\n{data_frame.dtypes}")
-    logging.info(f"\nDescriptive stats:\n{data_frame.describe()}")
 
+    try:
+        logging.info(sep)
+        logging.info("DATA SUMMARY")
+        logging.info(sep)
+        logging.info(f"Number of Rows: {data_frame.shape[0]}")
+        logging.info(f"Number of Columns: {data_frame.shape[1]}")
+        logging.info(f"Columns to list:\n {data_frame.columns.tolist()}")
+        logging.info(f"\nSplit by sequencer and cancer type:\n {data_frame[config.STRATIFY_COLUMNS].value_counts()}")
+        logging.info(sep)
+        logging.info("DATA QUALITY ")
+        logging.info(sep)
+        logging.info(f"Duplicte rows: {data_frame.duplicated().sum()} / {data_frame.shape[0]}")
+        logging.info(f"Missing values per column:\n{data_frame.isnull().sum()}")
+        logging.info(f"Dtypes:\n{data_frame.dtypes}")
+        logging.info(f"\nDescriptive stats:\n{data_frame.describe()}")
+
+    except Exception as e:
+        logging.error(f"Error loading dataframe for preprocessing summary")
+        raise
+
+
+# Remove duplicate values from the Sample QC dataframe
 def remove_duplicates(data_frame):
     """
     This function removes rows where the whole row is 
@@ -239,25 +252,44 @@ def remove_duplicates(data_frame):
     output
         dataframe: with duplicate rows removed 
     """
+    try:
+        logging.info(f"Removing any duplicate rows...") # Should I remove duplicate sample names - will this bias the model
+        original_len = len(data_frame)
+        deduplicated_df = data_frame.drop_duplicates()
+        final_len = len(deduplicated_df)
+        logging.info(f"Total rows removed due to duplication: {original_len - final_len}")
 
-    logging.info(f"Removing any duplicate rows...") # Should I remove duplicate sample names - will this bias the model
-    original_len = len(data_frame)
-    deduplicated_df = data_frame.drop_duplicates()
-    final_len = len(deduplicated_df)
-    logging.info(f"Total rows removed due to duplication: {original_len - final_len}")
+        return deduplicated_df
 
-    return deduplicated_df
+    except Exception as e:
+        logging.error(f"Error when removing duplicates: {e}")
+        raise
+
 
 def fix_data_types(data_frame):
     """
     This fixes known issues with the data 
-    before encoding or scaling """
+    before encoding or scaling.
+    
+        - Remove '?' values from the Fold80 column
+        - Replace with NaN
+    
+    params:
+        dataframe containing QC metrics including picard_fold80 columns
+        
+    output:
+        dataframe with cleaned picard_fold80 column"""
 
-    n_bad = (data_frame['picard_fold80'] == '?').sum()
-    logging.info(f"picard_fold80: replacing {n_bad} '?' values with NaN")
-    df = data_frame.copy()
-    df['picard_fold80'] = pd.to_numeric(df["picard_fold80"].replace("?", np.nan))
-    return df
+    try:
+        n_bad = (data_frame['picard_fold80'] == '?').sum()
+        logging.info(f"picard_fold80: replacing {n_bad} '?' values with NaN")
+        df = data_frame.copy()
+        df['picard_fold80'] = pd.to_numeric(df["picard_fold80"].replace("?", np.nan))
+        return df
+
+    except KeyError as e:
+        logging.error(f"Missing column (picard_fold80): {e}")
+        raise
 
 
 def separate_data(df: pd.DataFrame, assay_type: str, version: str) -> pd.DataFrame:
@@ -270,84 +302,86 @@ def separate_data(df: pd.DataFrame, assay_type: str, version: str) -> pd.DataFra
     Haem:
         NovaSeq X + haem_v3
 
-    Parameters
-    ----------
-    df : pd.DataFrame
-        Cleaned QC dataframe.
+    params
+        df : pd.DataFrame
+            Cleaned QC dataframe.
 
-    assay_type : str
-        Either "ST" or "haem".
+        assay_type : str
+            Either "ST" or "haem".
 
-    version : str
-        Either v2, v3 or v2_v3 for both 
+        version : str
+            Either v2, v3 or v2_v3 for both 
 
-    Returns
-    -------
-    pd.DataFrame
-        Dataframe containing only the requested assay.
+    output:
+        pd.DataFrame containing only the requested assay.
     """
 
     assay_type = assay_type.lower()
 
-    if assay_type == "st" and version == "v3":
-        filtered_df = df[
-            (df["sequencer"].str.lower() == "novaseqx") &
-            (df["cancer_type"].str.lower() == "solid_tumour_v3")
-        ].copy()
+    try:
+        if assay_type == "st" and version == "v3":
+            filtered_df = df[
+                (df["sequencer"].str.lower() == "novaseqx") &
+                (df["cancer_type"].str.lower() == "solid_tumour_v3")
+            ].copy()
 
-    elif assay_type == "haem" and version == "v3":
-        filtered_df = df[
-            (df["sequencer"].str.lower() == "novaseqx") &
-            (df["cancer_type"].str.lower() == "haem_v3")
-        ].copy()
+        elif assay_type == "haem" and version == "v3":
+            filtered_df = df[
+                (df["sequencer"].str.lower() == "novaseqx") &
+                (df["cancer_type"].str.lower() == "haem_v3")
+            ].copy()
 
-    elif assay_type == "st" and version == "v2":
-        filtered_df = df[
-                    (df["sequencer"].str.lower() == "novaseqx") &
-                    (df["cancer_type"].str.lower() == "solid_tumour")
-                ].copy()
+        elif assay_type == "st" and version == "v2":
+            filtered_df = df[
+                        (df["sequencer"].str.lower() == "novaseqx") &
+                        (df["cancer_type"].str.lower() == "solid_tumour")
+                    ].copy()
 
-    elif assay_type == "haem" and version == "v2":
-        filtered_df = df[
-                    (df["sequencer"].str.lower() == "novaseqx") &
-                    (df["cancer_type"].str.lower() == "haem_v2")
-                ].copy()
+        elif assay_type == "haem" and version == "v2":
+            filtered_df = df[
+                        (df["sequencer"].str.lower() == "novaseqx") &
+                        (df["cancer_type"].str.lower() == "haem_v2")
+                    ].copy()
 
-    elif assay_type == "st" and version == "v2_v3":
-        filtered_df = df[
-                    (df["sequencer"].str.lower() == "novaseqx") &
-                    (df["cancer_type"].str.lower().isin(["solid_tumour", "solid_tumour_v3"]))
-                ].copy()
+        elif assay_type == "st" and version == "v2_v3":
+            filtered_df = df[
+                        (df["sequencer"].str.lower() == "novaseqx") &
+                        (df["cancer_type"].str.lower().isin(["solid_tumour", "solid_tumour_v3"]))
+                    ].copy()
 
-    elif assay_type == "haem" and version == "v2_v3":
-        filtered_df = df[
-                    (df["sequencer"].str.lower() == "novaseqx") &
-                    (df["cancer_type"].str.lower().isin(["haem_v2", "haem_v3"]))
-                ].copy()
+        elif assay_type == "haem" and version == "v2_v3":
+            filtered_df = df[
+                        (df["sequencer"].str.lower() == "novaseqx") &
+                        (df["cancer_type"].str.lower().isin(["haem_v2", "haem_v3"]))
+                    ].copy()
 
-    else:
-        raise ValueError(
-            f"Unknown assay_type '{assay_type}'. "
-            "Expected 'ST' or 'haem'."
+        else:
+            raise ValueError(
+                f"Unknown assay_type '{assay_type}'. "
+                "Expected 'ST' or 'haem'."
+            )
+
+        logging.info(
+            f"Filtering for {assay_type.upper()} assay: "
+            f"{len(filtered_df)} samples retained"
         )
 
-    logging.info(
-        f"Filtering for {assay_type.upper()} assay: "
-        f"{len(filtered_df)} samples retained"
-    )
+        logging.info(
+            f"Sequencers:\n{filtered_df['sequencer'].value_counts().to_string()}"
+        )
 
-    logging.info(
-        f"Sequencers:\n{filtered_df['sequencer'].value_counts().to_string()}"
-    )
+        logging.info(
+            f"Cancer/pipeline versions:\n"
+            f"{filtered_df['cancer_type'].value_counts().to_string()}"
+        )
+        return filtered_df
 
-    logging.info(
-        f"Cancer/pipeline versions:\n"
-        f"{filtered_df['cancer_type'].value_counts().to_string()}"
-    )
-    return filtered_df
+    except Exception as e:
+        logging.error(f"There was an error when splitting the data: {e}")
+        raise
 
 
-def split_test_train(data_frame): # First iteration is using all the data without separating out the sequencer or cancertype 
+def split_test_train(data_frame):
     """ 
     This function splits the data into the test and training set.
     params:
@@ -357,15 +391,21 @@ def split_test_train(data_frame): # First iteration is using all the data withou
         Training dataframe
         Testing dataframe
     """
-    train_df, test_df = train_test_split(
-        data_frame,
-        test_size = 0.2,
-        random_state = 42,
-        stratify=data_frame[config.STRATIFY_COLUMNS] # Use cancer_type and sequencer to define training pop. These will NOT be given as features 
-    )
+    try:
+        train_df, test_df = train_test_split(
+            data_frame,
+            test_size = 0.2,
+            random_state = 42,
+            stratify=data_frame[config.STRATIFY_COLUMNS] # Use cancer_type and sequencer to define training pop. These will NOT be given as features 
+        )
 
-    logging.info(f"Train: {len(train_df)} rows | Test: {len(test_df)} rows")
-    return train_df, test_df
+        logging.info(f"Train: {len(train_df)} rows | Test: {len(test_df)} rows")
+        return train_df, test_df
+
+    except Exception as e:
+        logging.error(f"Error when splitting the data into train and test datasets: {e}")
+        raise
+
 
 # Encode catergorical data 
 def fit_encoder(train_df: pd.DataFrame) -> OneHotEncoder:
@@ -379,11 +419,16 @@ def fit_encoder(train_df: pd.DataFrame) -> OneHotEncoder:
     output:
         OneHotEncoder fit to the training data
     """
+    try:
+        ohe = OneHotEncoder(categories='auto', sparse_output=False, handle_unknown='ignore')
+        ohe.fit(train_df[config.CATERGORICAL_COLUMNS])
+        logging.info(f"OHE fitted. Categories: {ohe.categories_}")
+        return ohe
 
-    ohe = OneHotEncoder(categories='auto', sparse_output=False, handle_unknown='ignore')
-    ohe.fit(train_df[config.CATERGORICAL_COLUMNS])
-    logging.info(f"OHE fitted. Categories: {ohe.categories_}")
-    return ohe
+    except Exception as e:
+        logging.error(f"Error fitting the One Hot Encoder: {e}")
+        raise 
+
 
 def apply_encoder(df: pd.DataFrame, ohe: OneHotEncoder) -> pd.DataFrame:
     """
@@ -397,23 +442,28 @@ def apply_encoder(df: pd.DataFrame, ohe: OneHotEncoder) -> pd.DataFrame:
     output:
         dataframe with catergorical values encoded
     """
-    encoded = ohe.transform(df[config.CATERGORICAL_COLUMNS])
+    try:
+        encoded = ohe.transform(df[config.CATERGORICAL_COLUMNS])
 
-    encoded_df = pd.DataFrame(
-        encoded,
-        columns=ohe.get_feature_names_out(config.CATERGORICAL_COLUMNS),
-        index=df.index
-    )
+        encoded_df = pd.DataFrame(
+            encoded,
+            columns=ohe.get_feature_names_out(config.CATERGORICAL_COLUMNS),
+            index=df.index
+        )
 
-    data_frame = pd.concat(
-        [df.drop(columns=config.CATERGORICAL_COLUMNS), encoded_df],
-        axis=1
-    )
+        data_frame = pd.concat(
+            [df.drop(columns=config.CATERGORICAL_COLUMNS), encoded_df],
+            axis=1
+        )
 
-    return data_frame
+        return data_frame
+
+    except Exception as e:
+        logging.error(f"Error applying One Hot Encoder to data: {e}")
+        raise
+
 
 # Impute missing values from data 
-
 def fit_imputer(train_df: pd.DataFrame) -> SimpleImputer:
     """
     This function fits the SimpleImputer to the numerical columns
@@ -425,10 +475,16 @@ def fit_imputer(train_df: pd.DataFrame) -> SimpleImputer:
     output:
         SimpleImputer trained on the training data
     """
-    imputer = SimpleImputer(strategy = 'median')
-    imputer.fit(train_df)
-    logging.info('Imputer fitted on training data')
-    return imputer
+    try:
+        imputer = SimpleImputer(strategy = 'median')
+        imputer.fit(train_df)
+        logging.info('Imputer fitted on training data')
+        return imputer
+
+    except Exception as e:
+        logging.error(f"Error when fitting the imputer: {e}")
+        raise
+
 
 def apply_imputer(df: pd.DataFrame, imputer: SimpleImputer) -> pd.DataFrame:
     """
@@ -442,10 +498,15 @@ def apply_imputer(df: pd.DataFrame, imputer: SimpleImputer) -> pd.DataFrame:
     output:
         dataframe with all missing values replaced by the median
     """
-    imputed = imputer.transform(df)
-    imputed_df = pd.DataFrame(imputed, columns=df.columns, index=df.index)
+    try:
+        imputed = imputer.transform(df)
+        imputed_df = pd.DataFrame(imputed, columns=df.columns, index=df.index)
 
-    return imputed_df
+        return imputed_df
+
+    except Exception as e:
+        logging.error(f"Error applying imputer: {e}")
+    raise
 
 
 # Scale the data: Use standard scaler first, 
@@ -461,11 +522,14 @@ def fit_standard_scaler(train_df: pd.DataFrame):
     output:
         StandardScaler trained on the training data
     """
+    try:
+        stdsc = StandardScaler()
+        stdsc.fit(train_df)
+        logging.info("Scaler fitted on training data.")
+        return stdsc
 
-    stdsc = StandardScaler()
-    stdsc.fit(train_df)
-    logging.info("Scaler fitted on training data.")
-    return stdsc
+    except Exception as e:
+        logging.error(f"Error what fitting the standard scaler: {e}")
     
 def apply_standard_scaler(df: pd.DataFrame, scaler: StandardScaler) -> pd.DataFrame:
 
@@ -479,10 +543,13 @@ def apply_standard_scaler(df: pd.DataFrame, scaler: StandardScaler) -> pd.DataFr
     output:
         dataframe with scaled numerical values 
     """
+    try:
+        scaled = scaler.transform(df)
+        scaled_df = pd.DataFrame(scaled, columns=df.columns, index=df.index)
+        return scaled_df
+    except Exception as e:
+        logging.error(f"Error when applying the standard scaler: {e}")
 
-    scaled = scaler.transform(df)
-    scaled_df = pd.DataFrame(scaled, columns=df.columns, index=df.index)
-    return scaled_df
 
 # Robust scaler for future use 
 def fit_robust_scaler(train_df: pd.DataFrame):
@@ -517,6 +584,7 @@ def apply_robust_scaler(df: pd.DataFrame, scaler: RobustScaler) -> pd.DataFrame:
     scaled_df = pd.DataFrame(scaled, columns=df.columns, index=df.index)
     return scaled_df
 
+
 # Save the transformers
 def save_transformers(ohe, imputer, scaler, vt, to_drop_columns, out_dir: str) -> None:
     """
@@ -532,15 +600,19 @@ def save_transformers(ohe, imputer, scaler, vt, to_drop_columns, out_dir: str) -
     output:
         ohe, imputer, and scaler .pkl files saved to the specified directory
     """
+    try:
+        out_dir = Path(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        joblib.dump(ohe,     f"{out_dir}/ohe.pkl")
+        joblib.dump(imputer, f"{out_dir}/imputer.pkl")
+        joblib.dump(scaler,  f"{out_dir}/scaler.pkl")
+        joblib.dump(vt,  f"{out_dir}/vt.pkl")
+        joblib.dump(to_drop_columns,  f"{out_dir}/dropped_columns.pkl")
+        logging.info(f"Transformers saved to {out_dir}/")
 
-    out_dir = Path(out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    joblib.dump(ohe,     f"{out_dir}/ohe.pkl")
-    joblib.dump(imputer, f"{out_dir}/imputer.pkl")
-    joblib.dump(scaler,  f"{out_dir}/scaler.pkl")
-    joblib.dump(vt,  f"{out_dir}/vt.pkl")
-    joblib.dump(to_drop_columns,  f"{out_dir}/dropped_columns.pkl")
-    logging.info(f"Transformers saved to {out_dir}/")
+    except Exception as e:
+        logging.error(f"Error saving transformers: {e}")
+
 
 # Feature selection
 # Identify columns that have very little variance
@@ -555,11 +627,15 @@ def fit_variance_threshold(X_train: pd.DataFrame, threshold:float = 0.01) -> Var
     output:
         VarianceThreshold fitted on the training data
     """
-    vt = VarianceThreshold(threshold=threshold)
-    vt.fit(X_train)
-    dropped = X_train.columns[~vt.get_support()].tolist()
-    logging.info(f"VarianceThreshold dropping {len(dropped)} features: {dropped}")
-    return vt
+    try:
+        vt = VarianceThreshold(threshold=threshold)
+        vt.fit(X_train)
+        dropped = X_train.columns[~vt.get_support()].tolist()
+        logging.info(f"VarianceThreshold dropping {len(dropped)} features: {dropped}")
+        return vt
+
+    except Exception as e:
+        logging.error(f"Error fitting variance threshold: {e}")
 
 def apply_variance_threshold(df: pd.DataFrame, vt: VarianceThreshold) -> pd.DataFrame:
 
@@ -574,13 +650,17 @@ def apply_variance_threshold(df: pd.DataFrame, vt: VarianceThreshold) -> pd.Data
     output:
         dataframe with variance failed returned 
     """
+    try:
+        df = pd.DataFrame(
+            vt.transform(df),
+            columns=df.columns[vt.get_support()],
+            index=df.index
+        )
+        return df
 
-    df = pd.DataFrame(
-        vt.transform(df),
-        columns=df.columns[vt.get_support()],
-        index=df.index
-    )
-    return df
+    except Exception as e:
+        logging.error(f"Error applying variance threshold: {e}")
+
 
 # Find and Remove highly correlated pairs of data to prevent overweighting 
 def find_correlated_features(X_train, threshold=0.95):
@@ -596,13 +676,13 @@ def find_correlated_features(X_train, threshold=0.95):
         dataframe of correlated pairs
     """
     
-    corr_matrix = X_train.corr().abs()
+    corr_matrix = X_train.corr().abs() #calculates pearson correlation coefficient between each pair 
 
     upper = corr_matrix.where(
-        np.triu(
-            np.ones(corr_matrix.shape),
+        np.triu(        # only the upper triangle
+            np.ones(corr_matrix.shape), #create a matrix of 1's with the same dimentions as corr_matrix
             k=1
-        ).astype(bool)
+        ).astype(bool) #this becomes a boolean mask 
     )
 
     correlated_pairs = []
@@ -623,7 +703,7 @@ def find_correlated_features(X_train, threshold=0.95):
 
 
 # Run preprocessing 
-def run_preprocessing(file_path: str, assay_type: str, out_dir: None, version):
+def run_preprocessing(file_path: str, assay: str, version: str, out_dir: None):
     """
     This function strings together all of the preprocessing steps
     to prepare the data for training the machine learning model.
@@ -647,7 +727,11 @@ def run_preprocessing(file_path: str, assay_type: str, out_dir: None, version):
     """
     
     # Load the input
-    df = load_data(file_path)
+    try:
+        df = load_data(file_path)
+    except FileNotFoundError as e:
+        logging.error(f"File not found for preprocessing: {e}")
+        raise
 
     # Audit the data
     explore_qc_data(df)
@@ -656,18 +740,16 @@ def run_preprocessing(file_path: str, assay_type: str, out_dir: None, version):
     df = remove_duplicates(df)
     df = fix_data_types(df)
 
-    df.to_csv('data/processed/cleaned_summary_qc_metrics(3).csv', sep='\t')
-
     # Filter to the requested production assay
     df = separate_data(
         df,
-        assay_type=assay_type,
+        assay_type=assay,
         version=version
     )
 
     if len(df) < 10:
         raise ValueError(
-            f"Only {len(df)} samples available for {assay_type}. "
+            f"Only {len(df)} samples available for {assay}. "
             "Not enough data for preprocessing."
         )
 
@@ -675,8 +757,12 @@ def run_preprocessing(file_path: str, assay_type: str, out_dir: None, version):
     train_df, test_df = split_test_train(df)
 
     # Isolate the metadata to save 
-    train_meta = train_df[["sample_name", "cancer_type", "sequencer", "assay_type", "worklist"]].copy()  # keep assay label for per-assay plots later
-    test_meta  = test_df[["sample_name", "cancer_type", "sequencer", "assay_type", "worklist"]].copy()
+    try:
+        train_meta = train_df[["sample_name", "cancer_type", "sequencer", "assay_type", "worklist"]].copy()  # keep assay label for per-assay plots later
+        test_meta  = test_df[["sample_name", "cancer_type", "sequencer", "assay_type", "worklist"]].copy()
+
+    except KeyError as e:
+        logging.info(f"Missing column from data for preprocessing: {e}")
 
     # Encode the catergorical values 
     # Fit on train only
@@ -692,8 +778,12 @@ def run_preprocessing(file_path: str, assay_type: str, out_dir: None, version):
 
     # Drop the metadata
     # Extract feature matrices — drop metadata
-    X_train = train_df[all_features]
-    X_test  = test_df[all_features]
+    try:
+        X_train = train_df[all_features]
+        X_test  = test_df[all_features]
+
+    except KeyError as e:
+        logging.error(f"Missing column from preprocessing data: {e}")
 
     # Impute the data
     imputer = fit_imputer(X_train)
@@ -781,8 +871,8 @@ if __name__ == "__main__":
     X_train, X_test, train_meta, test_meta = run_preprocessing(
         file_path=config.SUMMARY_QC_METRICS,
         assay_type=args.assay,
+        version=args.version,
         out_dir=output_dir,
-        version=args.version
     )
 
     logging.info(

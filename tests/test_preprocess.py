@@ -69,34 +69,38 @@ def test_fix_data_types():
     )
     assert pd.isna(result.loc[1, "picard_fold80"])
     assert result.loc[0, "picard_fold80"] == pytest.approx(1.794)
-    assert result.loc[0, "assay"] == "novaseqx_solid_tumour"
-    assert result.loc[2, "assay"] == "novaseq6000_solid_tumour"
+    assert result.loc[0, "sequencer"] == "novaseqx"
+    assert result.loc[2, "sequencer"] == "novaseq6000"
 
 # create the test
-def create_test_qc_data(n_per_group=5):
+def create_test_qc_data(n_per_group=10):
 
     rows = []
     sample_number = 1
 
     # Create enough samples for stratified train/test splitting
-    for sequencer in ["novaseqx", "novaseq6000"]:
-        for cancer_type in ["solid_tumour", "haem"]:
+    for sequencer in ['novaseqx', 'novaseq6000']:
+        for version in ["v2", "v3"]:
+            for cancer_type in ["solid_tumour", "haem"]:
 
-            for _ in range(n_per_group):
+                for _ in range(n_per_group):
 
-                row = {
-                    "sample_name": f"sample{sample_number}",
-                    "sequencer": sequencer,
-                    "cancer_type": cancer_type,
-                    "fastqc_basic_status": (
-                        "pass|pass"
-                        if sample_number % 2 == 0
-                        else "pass|pass|pass|pass"
-                    )
-                }
+                    row = {
+                        "sample_name": f"sample{sample_number}",
+                        "sequencer": sequencer,
+                        "assay_type": sequencer + '_' + cancer_type + '_' + version,
+                        "cancer_type": cancer_type + '_' + version,
+                        "version": version,
+                        "worklist": 12345,
+                        "fastqc_basic_status": (
+                            "pass|pass"
+                            if sample_number % 2 == 0
+                            else "pass|pass|pass|pass"
+                        )
+                    }
 
-                rows.append(row)
-                sample_number += 1
+                    rows.append(row)
+                    sample_number += 1
 
     df = pd.DataFrame(rows)
 
@@ -120,8 +124,8 @@ def test_split_test_train():
 
     train, test = split_test_train(df)
 
-    assert len(train) == 16
-    assert len(test) == 4
+    assert len(train) == 64
+    assert len(test) == 16
     assert set(train.index).isdisjoint(test.index)
 
 
@@ -329,9 +333,11 @@ def test_run_preprocessing(tmp_path):
     )
 
     # Run the complete preprocessing pipeline
-    X_train, X_test = run_preprocessing(
+    X_train, X_test, train_meta, test_meta = run_preprocessing(
         file_path=input_file,
-        out_dir=str(output_dir)
+        assay='haem',
+        version='v2',
+        out_dir=str(output_dir),
     )
 
     # Check that outputs are DataFrames
@@ -342,8 +348,8 @@ def test_run_preprocessing(tmp_path):
     assert list(X_train.columns) == list(X_test.columns)
 
     # Check that the split happened correctly
-    assert len(X_train) == 16
-    assert len(X_test) == 4
+    assert len(X_train) == 8
+    assert len(X_test) == 2
 
     # Check that preprocessing removed missing values
     assert not X_train.isna().any().any()
