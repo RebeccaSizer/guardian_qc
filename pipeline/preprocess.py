@@ -281,11 +281,9 @@ def fix_data_types(data_frame):
         dataframe with cleaned picard_fold80 column"""
 
     try:
-        n_bad = (data_frame['picard_fold80'] == '?').sum()
-        logging.info(f"picard_fold80: replacing {n_bad} '?' values with NaN")
-        df = data_frame.copy()
-        df['picard_fold80'] = pd.to_numeric(df["picard_fold80"].replace("?", np.nan))
-        return df
+        logging.info('Removing rows with missing values')
+        data_frame = data_frame[data_frame['picard_fold80'] != '?']
+        return data_frame
 
     except KeyError as e:
         logging.error(f"Missing column (picard_fold80): {e}")
@@ -294,7 +292,8 @@ def fix_data_types(data_frame):
 
 def separate_data(df: pd.DataFrame, assay_type: str, version: str) -> pd.DataFrame:
     """
-    Filter the QC dataset to the current production assay.
+    Filter the QC dataset to the current production assay. Only data from the NovaSeqX will be used
+    from here on.
 
     ST:
         NovaSeq X + solid_tumour_v3
@@ -374,7 +373,9 @@ def separate_data(df: pd.DataFrame, assay_type: str, version: str) -> pd.DataFra
             f"Cancer/pipeline versions:\n"
             f"{filtered_df['cancer_type'].value_counts().to_string()}"
         )
+        filtered_df.to_csv(f"data/processed/split_data_only_{assay_type}_{version}.csv")
         return filtered_df
+
 
     except Exception as e:
         logging.error(f"There was an error when splitting the data: {e}")
@@ -476,7 +477,7 @@ def fit_imputer(train_df: pd.DataFrame) -> SimpleImputer:
         SimpleImputer trained on the training data
     """
     try:
-        imputer = SimpleImputer(strategy = 'median')
+        imputer = SimpleImputer(strategy = 'mean')
         imputer.fit(train_df)
         logging.info('Imputer fitted on training data')
         return imputer
@@ -786,38 +787,59 @@ def run_preprocessing(file_path: str, assay: str, version: str, out_dir: None):
         logging.error(f"Missing column from preprocessing data: {e}")
 
     # Impute the data
+    logging.info('Fitting Imputer ...')
     imputer = fit_imputer(X_train)
+
+    logging.info('Applying imputer ... ')
     X_train = apply_imputer(X_train, imputer)
     X_test = apply_imputer(X_test, imputer)
 
     # Scale the data
-    scaler = fit_standard_scaler(X_train)
-    X_train = apply_standard_scaler(X_train, scaler)
-    X_test = apply_standard_scaler(X_test, scaler)
+    scaler = fit_robust_scaler(X_train)
 
-    # Variance threshold - this drops none 
+    logging.info('Scaling data using the Robust scaler') # Chose to use robust scaler as less affected by outliers. 
+    X_train = apply_robust_scaler(X_train, scaler)
+    X_test = apply_robust_scaler(X_test, scaler)
+
+    # Variance threshold - Decided against dropping based on variance
     vt = fit_variance_threshold(X_train)
     X_train = apply_variance_threshold(X_train, vt)
     X_test = apply_variance_threshold(X_test, vt)
 
     # Remove correlated features to prevent too much weight on certian features 
-    find_correlated_features(X_train)
-    logging.info('Analysing correlation between features')
+    correlated = find_correlated_features(X_train)
+    logging.info(f'Analysing correlation between features: {print(correlated)}')
 
-    columns_to_drop = [
-        'picard_total_reads',
-        'picard_pf_reads',
-        'picard_mean_target_coverage',
-        'picard_mean_insert',
-        'picard_mad_insert',
-        'picard_median_target_coverage',
-        'fastqc_basic_status_pass|pass',
-        'fastqc_basic_status_pass|pass|pass|pass',
-        'bcftools_variants',
-        'picard_target_bases_20x',
-        'picard_target_bases_30x',
-        'picard_target_bases_50x',
-    ]
+    plot_correlation_matrix(X_train, assay, os.path.join('outputs/graphs/preprocessing/metric_correlation_matrix_all_columns/'))
+
+    if assay.lower() == 'haem':
+        columns_to_drop = [
+            'bcftools_ts',
+            'picard_pf_reads',
+            'picard_mean_target_coverage',
+            'picard_mean_insert',
+            'fastqc_basic_status_pass|pass',
+            'fastqc_basic_status_pass|pass|pass|pass',
+            'bcftools_variants',
+            'picard_target_bases_20x',
+            'picard_target_bases_30x',
+            'picard_target_bases_50x'
+        ]
+    elif assay.lower() == 'st':
+        columns_to_drop = [
+            'picard_total_reads',
+            'picard_pf_reads',
+            'picard_mean_target_coverage',
+            'picard_mean_insert',
+            'picard_median_target_coverage',
+            'fastqc_basic_status_pass|pass',
+            'fastqc_basic_status_pass|pass|pass|pass',
+            'bcftools_variants',
+            'picard_target_bases_20x',
+            'picard_target_bases_30x',
+            'picard_target_bases_50x'
+
+        ]
 
     # Only drop columns that are actually present
     to_drop = [
@@ -833,6 +855,8 @@ def run_preprocessing(file_path: str, assay: str, version: str, out_dir: None):
 
     X_train = X_train.drop(columns=to_drop)
     X_test = X_test.drop(columns=to_drop)
+
+    plot_correlation_matrix(X_train, assay, os.path.join('outputs/graphs/preprocessing/metric_correlation_matrix_filtered/'))
 
     if out_dir is not None:
         save_transformers(ohe, imputer, scaler, vt, to_drop, out_dir)
@@ -870,7 +894,7 @@ if __name__ == "__main__":
 
     X_train, X_test, train_meta, test_meta = run_preprocessing(
         file_path=config.SUMMARY_QC_METRICS,
-        assay_type=args.assay,
+        assay=args.assay,
         version=args.version,
         out_dir=output_dir,
     )
@@ -884,5 +908,5 @@ if __name__ == "__main__":
     )
 
     print(
-        f"Testing samples: {len(X_test)}, meta data: {len(train_meta)}"
+        f"Testing samples: {len(X_test)}, meta data: {len(test_meta)}"
     )

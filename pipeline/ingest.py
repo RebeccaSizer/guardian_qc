@@ -65,7 +65,39 @@ from qc.inter_op import inter_op_qc
 import config
 from pathlib import Path
 import pandas as pd
+import matplotlib.pyplot as plt
+from sklearn.preprocessing import RobustScaler
+from sklearn.decomposition import PCA
 
+metric_cols = [
+        "bcftools_ts",
+        "bcftools_tv",
+        "bcftools_tstv",
+        "bcftools_variants",
+        "bcftools_snvs",
+        "bcftools_indels",
+        "picard_mode_insert",
+        "picard_mean_insert",
+        "picard_median_insert",
+        "picard_mad_insert",
+        "picard_total_reads",
+        "picard_pf_reads",
+        "picard_pf_q30_bases",
+        "picard_read_length",
+        "picard_at_dropout",
+        "picard_gc_dropout",
+        "picard_fold_enrichment",
+        "picard_fold80",
+        "picard_mean_target_coverage",
+        "picard_median_target_coverage",
+        "picard_target_bases_20x",
+        "picard_target_bases_30x",
+        "picard_target_bases_50x",
+        "picard_target_bases_100x",
+        "fastqc_duplication_rate",
+        #"fastqc_basic_status", This metric is str
+        "fastp_duplication_rate",
+    ]
 
 # This function gets the sample name from the file path 
 def get_qc_summary_file_path():
@@ -117,7 +149,6 @@ def get_qc_summary_file_path():
                     for file_path in worklist_dir.iterdir():
 
                         if not file_path.name.startswith(worklist):
-                            logging.info(f'Skipping folder at file path {file_path} due to mismatch between worklist folder and file name')
                             continue
                             # Skip files that don't start with the worklist number
 
@@ -583,7 +614,195 @@ def sample_level_qc(df):
     except KeyError as e:
         logging.error(f"Missing column: {e}")
 
+#################################################
+# plot graphs for ingestion
+#################################################
 
+def pie_chart_run_metric_pass_rate(df):
+    counts = df['pass_run_qc'].value_counts()
+
+    labels = [
+        "Pass" if label == "Yes" else label
+        for label in counts.index
+    ]
+
+    colours = {
+        'Yes': '#4ECFF7',  # Blue
+        'Percent Q30 < 80 AND Error rate > 2': '#AF4C82',  # Pink
+        'Error rate > 2': '#FFC107'  # Yellow
+    }
+
+    pie_colours = [colours.get(label, '#D3D3D3') for label in counts.index]
+
+    # Create figure
+    fig, ax = plt.subplots(figsize=(8, 6))
+
+    wedges, _, autotexts = ax.pie(
+        counts,
+        labels=None,
+        colors=pie_colours,
+        autopct="%1.1f%%",
+        startangle=90,
+        textprops={"fontsize": 12},
+        pctdistance=1.1,
+    )
+
+    # Move the two smallest percentages
+    autotexts[1].set_position((0.3, 1.06))
+    autotexts[2].set_position((-0.03, 1.1))
+
+    # Equal aspect ratio keeps the pie circular
+    ax.axis("equal")
+
+    # Title
+    ax.set_title(
+        "Proportion of Runs Passing Run-Level QC",
+        fontsize=14,
+        fontweight="bold",
+    )
+
+    # Legend
+    ax.legend(
+        wedges,
+        labels,
+        title="Run QC Status",
+        loc="center left",
+        bbox_to_anchor=(1, 0.5),
+    )
+
+    plt.tight_layout()
+
+    # Save figure
+    plt.show()
+    plt.savefig('outputs/graphs/data_exploration/pie_chart_pass_run_qc.png')
+
+
+def bar_chart_sample_count_by_sequencer_and_cancer_type(df):
+
+    counts = df[['sequencer', 'cancer_type']].value_counts().reset_index(name="count")
+
+    # Create a combined label for the x-axis
+    counts["label"] = counts["sequencer"] + ": " + counts["cancer_type"]
+
+    fig, ax = plt.subplots(figsize=(8, 6))
+
+    plt.figure(figsize=(8, 6))
+    plt.bar(counts["label"], counts["count"])
+
+    plt.xlabel("Sequencer / Cancer Type")
+    plt.ylabel("Number of Samples")
+    plt.title("Samples by Sequencer and Cancer Type")
+    plt.xticks(rotation=45, ha="right")
+
+    plt.tight_layout()
+    plt.savefig('outputs/graphs/data_exploration/sample_count_by_cancer_type_and_sequencer.png')
+
+
+def comparing_sequencer_cancer_type(df):
+
+    # Scale
+    X = df[metric_cols].fillna(df[metric_cols].median())
+    X_scaled = RobustScaler().fit_transform(X)
+
+    # PCA
+    pca = PCA(n_components=2)
+    coords = pca.fit_transform(X_scaled)
+    df["PC1"] = coords[:, 0]
+    df["PC2"] = coords[:, 1]
+
+    loadings = pd.DataFrame(
+        pca.components_.T,
+        index=metric_cols,
+        columns=["PC1", "PC2"]
+    )
+    print(loadings["PC1"].abs().sort_values(ascending=False).head(10))
+    print(loadings["PC2"].abs().sort_values(ascending=False).head(10))
+
+    print(pca.explained_variance_ratio_)
+
+    var1 = pca.explained_variance_ratio_[0] * 100
+    var2 = pca.explained_variance_ratio_[1] * 100
+
+    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+
+    # By sequencer
+    for seq in df["sequencer"].unique():
+        mask = df["sequencer"] == seq
+        axes[0].scatter(df.loc[mask,"PC1"], df.loc[mask,"PC2"],
+                        label=seq, alpha=0.3, s=6)
+
+    axes[0].set_title("By sequencer")
+    axes[0].set_xlabel(f"PC1 ({var1:.1f}%)")
+    axes[0].set_ylabel(f"PC2 ({var2:.1f}%)")
+    axes[0].legend(markerscale=4, fontsize=8)
+
+    # By cancer type
+    for ct in df["cancer_type"].unique():
+        mask = df["cancer_type"] == ct
+        axes[1].scatter(df.loc[mask,"PC1"], df.loc[mask,"PC2"],
+                        label=ct, alpha=0.3, s=6)
+    axes[1].set_title("By cancer type")
+    axes[1].set_xlabel(f"PC1 ({var1:.1f}%)")
+    axes[1].legend(markerscale=4, fontsize=8)
+
+    # By both — combine labels
+    df["group"] = df["sequencer"] + " | " + df["cancer_type"]
+    for grp in df["group"].unique():
+        mask = df["group"] == grp
+        axes[2].scatter(df.loc[mask,"PC1"], df.loc[mask,"PC2"],
+                        label=grp, alpha=0.3, s=6)
+    axes[2].set_title("By sequencer + cancer type")
+    axes[2].set_xlabel(f"PC1 ({var1:.1f}%)")
+    axes[2].legend(markerscale=4, fontsize=8, 
+                bbox_to_anchor=(1.05, 1), loc='upper left')
+
+    plt.tight_layout()
+    plt.savefig("outputs/graphs/data_exploration/pca_by_group.png", dpi=150, bbox_inches="tight")
+
+
+def test_group_differences(df, cols, group_col):
+    """
+    For each metric, run Kruskal-Wallis across groups.
+
+    Returns a summary DataFrame sorted by p-value,
+    including the number of observations in each group.
+    """
+
+    results = []
+
+    groups = df[group_col].dropna().unique()
+    print(groups)
+
+    for col in cols:
+
+        group_data = {
+            g: df.loc[df[group_col] == g, col].dropna().values
+            for g in groups
+        }
+
+        # Only test if all groups have >1 observation
+        if all(len(values) > 1 for values in group_data.values()):
+
+            stat, p = stats.kruskal(*group_data.values())
+
+            results.append({
+                "metric": col,
+                "group_by": group_col,
+                "H_stat": round(stat, 3),
+                "p_value": p,
+                "significant": p < 0.05,
+                "n_min": min(len(values) for values in group_data.values()),
+                "n_max": max(len(values) for values in group_data.values()),
+                "group_sizes": {
+                    g: len(values)
+                    for g, values in group_data.items()
+                }
+            })
+
+    return pd.DataFrame(results).sort_values("p_value")
+
+
+###################################################
 # Ingest data using above functions
 def ingest_data():
     """
@@ -639,11 +858,18 @@ def ingest_data():
 
     # Filter the data
     df = filter_df(df)
+
     df = filter_run_qc(df)
+    pie_chart_run_metric_pass_rate(df)
+    
+    bar_chart_sample_count_by_sequencer_and_cancer_type(df)
+
     df.to_csv(config.FILTERED_RUN_QC_DATA, sep="\t", index=False)
 
     # Extract summary QC metrics
     summary_qc_metrics_df = sample_level_qc(df)
+    comparing_sequencer_cancer_type(summary_qc_metrics_df)
+
     summary_qc_metrics_df.to_csv(config.SUMMARY_QC_METRICS, sep = "\t", index = False)
 
     logging.info(
@@ -654,7 +880,30 @@ def ingest_data():
 
     return summary_qc_metrics_df
 
+
+
+
 #test functions in script
 if __name__ == "__main__":
-   df = ingest_data()
-   print(df)
+    df = ingest_data()
+    df_metrics = df.copy()
+
+    df_st = df_metrics(df_metrics['cancer_type'] == 'solid_tumour') | (df_metrics['cancer_type'] == 'solid_tumour_v3').copy()
+
+    df_haem = df_metrics(df_metrics['cancer_type'] == 'haem_v2') | (df_metrics['cancer_type'] == 'haem_v3').copy()
+
+    results_seq_st   = test_group_differences(df_st, metric_cols, "sequencer")
+    results_seq_haem   = test_group_differences(df_haem, metric_cols, "sequencer")
+
+    results_cancer = test_group_differences(df_qc_metrics, metric_cols, "cancer_type")
+    results_both_st = test_group_differences(df_st, metric_cols, "assay_type")
+    results_both_haem = test_group_differences(df_haem, metric_cols, "assay_type")
+
+    print("=== By sequencer ===")
+    print(results_seq_st[["metric","H_stat","p_value","significant"]].to_string())
+
+    print("\n=== By cancer type ===")
+    print(results_cancer[["metric","H_stat","p_value","significant"]].to_string())
+
+    print("\n=== By sequencer and cancer type ===")
+    print(results_both_st[["metric","H_stat","p_value","significant"]].to_string())

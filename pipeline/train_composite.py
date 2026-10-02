@@ -257,10 +257,10 @@ def explain_all_outliers(
  
     all_explanations = pd.concat(explanation_rows, ignore_index=True)
  
-    os.makedirs(out_dir, exist_ok=True)
-    out_path = os.path.join(out_dir, f"{assay}_{version}_{split}_outlier_explanations.csv")
-    all_explanations.to_csv(out_path, index=False)
-    logging.info(f"[{assay}_{version}] Explanations saved to {out_path}")
+    #os.makedirs(out_dir, exist_ok=True)
+    #out_path = os.path.join(out_dir, f"{assay}_{version}_{split}_outlier_explanations.csv")
+    #all_explanations.to_csv(out_path, index=False)
+    logging.info(f"[{assay}_{version}] Explanations saved to {out_dir}")
  
     return all_explanations
  
@@ -309,7 +309,7 @@ def attach_metadata(X_scored: pd.DataFrame, meta: pd.DataFrame) -> pd.DataFrame:
 def run_model_train(X_train, X_test, train_meta, test_meta, assay, version, split, contamination, out_dir):
 
     model = fit_isolation_forest(X_train, assay, version, contamination)
-    save_model(model, assay, version, out_dir)
+    save_model(model, assay, version, os.path.join('models/trained/composite', args.assay))
 
     X_train_scored = score_samples(model, X_train, assay, version, 'train')
     X_test_scored = score_samples(model, X_test, assay, version, 'test')
@@ -367,7 +367,7 @@ if __name__ == "__main__":
 
     parser.add_argument(
         "--assay",
-        choices=["ST", "haem"],
+        choices=["st", "haem"],
         required=True,
         help='Assay to train model: "st" or "haem"'
     )
@@ -392,14 +392,14 @@ if __name__ == "__main__":
     if args.assay == 'haem':
         contamination = 0.08
 
-    elif args.assay == 'ST':
+    elif args.assay == 'st':
         contamination = 0.15
 
     X_train, X_test, train_meta, test_meta = run_preprocessing(config.SUMMARY_QC_METRICS, args.assay, out_dir=None, version=args.version)
 
-    explained_model_train, explained_model_test = run_model_train(X_train, X_test, train_meta, test_meta, args.assay, args.version, args.split, contamination, os.path.join('models/trained', args.assay ))
+    explained_model_train, explained_model_test = run_model_train(X_train, X_test, train_meta, test_meta, args.assay, args.version, args.split, contamination, os.path.join('data/processed/from_model/', args.assay ))
 
-    #plot_score_distribution(X_train, X_test_scored, args.assay, os.path.join('outputs/graphs/train', args.assay, args.version))
+    plot_score_distribution(explained_model_train, explained_model_test, args.assay, os.path.join('outputs/graphs/train', args.assay, args.version))
 
     #plot_flagging_rates(flagging_rate, 'outputs/graphs/train/')
 

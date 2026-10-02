@@ -153,10 +153,11 @@ if __name__=="__main__":
     )
 
     # Correlation matrices
-    for assay in df["assay_type"].dropna().unique():
+    
+    for assay in df["cancer_type"].dropna().unique():
 
         assay_features = df.loc[
-            df["assay_type"] == assay,
+            df["cancer_type"] == assay,
             config.MODEL_FEATURES
         ].copy()
 
@@ -165,6 +166,6 @@ if __name__=="__main__":
             assay=assay,
             out_dir=os.path.join(
                 config.PREPROCESSING_PLOT_DIR,
-                "metric_correlation_matrix_1"
+                "metric_correlation_matrix_all_columns"
             )
         )

@@ -79,7 +79,7 @@ MODEL_FEATURES = [
 
 CATERGORICAL_COLUMNS = ['fastqc_basic_status']
 METADATA_COLUMNS = ['sample_name', 'cancer_type', 'sequencer']
-STRATIFY_COLUMNS = ['cancer_type', 'sequencer']
+STRATIFY_COLUMNS = ['cancer_type', 'sequencer', 'assay_type']
 
 # Set output directory for preprocessing files 
 PREPROCESSING_OUTDIR = 'models/preprocessing/'

@@ -27,9 +27,9 @@ metric_cols = [
         "picard_pf_q30_bases",
         "picard_read_length",
         "picard_at_dropout",
-        "picards_gc_dropout",
+        "picard_gc_dropout",
         "picard_fold_enrichment",
-        #"picard_fold80",
+        "picard_fold80",
         "picard_mean_target_coverage",
         "picard_median_target_coverage",
         "picard_target_bases_20x",
@@ -37,7 +37,7 @@ metric_cols = [
         "picard_target_bases_50x",
         "picard_target_bases_100x",
         "fastqc_duplication_rate",
-        #"fastqc_basic_status",
+        #"fastqc_basic_status", This metric is str
         "fastp_duplication_rate",
     ]
 
@@ -99,6 +99,7 @@ def pie_chart_run_metric_pass_rate (df):
     plt.show()
     plt.savefig('outputs/graphs/data_exploration/pie_chart_pass_run_qc.png')
 
+
 def bar_chart_sample_count_by_sequencer_and_cancer_type(df):
 
     counts = df[['sequencer', 'cancer_type']].value_counts().reset_index(name="count")
@@ -119,11 +120,12 @@ def bar_chart_sample_count_by_sequencer_and_cancer_type(df):
     plt.tight_layout()
     plt.savefig('outputs/graphs/data_exploration/sample_count_by_cancer_type_and_sequencer.png')
 
+
 def comparing_sequencer_cancer_type (df):
 
     # Scale
     X = df[metric_cols].fillna(df[metric_cols].median())
-    X_scaled = StandardScaler().fit_transform(X)
+    X_scaled = RobustScaler().fit_transform(X)
 
     # PCA
     pca = PCA(n_components=2)
@@ -180,58 +182,85 @@ def comparing_sequencer_cancer_type (df):
     plt.tight_layout()
     plt.savefig("outputs/graphs/data_exploration/pca_by_group.png", dpi=150, bbox_inches="tight")
 
+
 def test_group_differences(df, cols, group_col):
     """
     For each metric, run Kruskal-Wallis across groups.
-    Returns a summary DataFrame sorted by p-value.
+
+    Returns a summary DataFrame sorted by p-value,
+    including the number of observations in each group.
     """
+
     results = []
-    groups = df[group_col].unique()
-    
+
+    groups = df[group_col].dropna().unique()
+    print(groups)
+
     for col in cols:
-        # One list of values per group, dropping NaNs
-        group_data = [
-            df.loc[df[group_col] == g, col].dropna().values
+
+        group_data = {
+            g: df.loc[df[group_col] == g, col].dropna().values
             for g in groups
-        ]
-        # Only test if all groups have data
-        if all(len(g) > 1 for g in group_data):
-            stat, p = stats.kruskal(*group_data)
+        }
+
+        # Only test if all groups have >1 observation
+        if all(len(values) > 1 for values in group_data.values()):
+
+            stat, p = stats.kruskal(*group_data.values())
+
             results.append({
-                "metric":   col,
+                "metric": col,
                 "group_by": group_col,
-                "H_stat":   round(stat, 3),
-                "p_value":  p,
-                "significant": p < 0.05
+                "H_stat": round(stat, 3),
+                "p_value": p,
+                "significant": p < 0.05,
+                "n_min": min(len(values) for values in group_data.values()),
+                "n_max": max(len(values) for values in group_data.values()),
+                "group_sizes": {
+                    g: len(values)
+                    for g, values in group_data.items()
+                }
             })
-    
+
     return pd.DataFrame(results).sort_values("p_value")
 
 
 # test in main 
 if __name__ == "__main__":
-    df_run_metrics = pd.read_csv("outputs/filtered_run_metrics.csv", sep="\t")
-    df_qc_metrics = pd.read_csv("outputs/summary_qc_metrics.csv", sep = "\t")
+
+    #df_run_metrics = pd.read_csv("outputs/filtered_run_metrics.csv", sep="\t")
+    df_qc_metrics = pd.read_csv("data/processed/cleaned_summary_qc_metrics(3).csv", sep='\t')
+    print(df_qc_metrics)
+    df_st = df_qc_metrics(df_qc_metrics['cancer_type'] == 'solid_tumour') | (df_qc_metrics['cancer_type'] == 'solid_tumour_v3').copy()
+    print(df_st)
+
+    df_haem = df_qc_metrics(df_qc_metrics['cancer_type'] == 'haem_v2') | (df_qc_metrics['cancer_type'] == 'haem_v3').copy()
+    print(df_haem)
 
     #pie_chart_run_metric_pass_rate(df_run_metrics)
     #bar_chart_sample_count_by_sequencer_and_cancer_type(df_qc_metrics)
     #comparing_sequencer_cancer_type(df_qc_metrics)
+
     # Run for each grouping
-    #results_seq    = test_group_differences(df_qc_metrics, metric_cols, "sequencer")
-    #results_cancer = test_group_differences(df_qc_metrics, metric_cols, "cancer_type")
+    results_seq_st   = test_group_differences(df_st, metric_cols, "sequencer")
+    results_seq_haem   = test_group_differences(df_haem, metric_cols, "sequencer")
 
-    #df_qc_metrics_extra = df_qc_metrics.copy()
-    #df_qc_metrics_extra["cancer_sequencer"] = (df_qc_metrics_extra["cancer_type"] + "_" + df_qc_metrics_extra["sequencer"])
-    #results_both = test_group_differences(df_qc_metrics_extra, metric_cols, "cancer_sequencer")
+    results_cancer = test_group_differences(df_qc_metrics, metric_cols, "cancer_type")
+    results_both_st = test_group_differences(df_st, metric_cols, "assay_type")
+    results_both_haem = test_group_differences(df_haem, metric_cols, "assay_type")
 
-    #print("=== By sequencer ===")
-    #print(results_seq[["metric","H_stat","p_value","significant"]].to_string())
+    df_qc_metrics_extra = df_qc_metrics.copy()
+    df_qc_metrics_extra["cancer_sequencer"] = (df_qc_metrics_extra["cancer_type"] + "_" + df_qc_metrics_extra["sequencer"])
+    results_both2 = test_group_differences(df_qc_metrics_extra, metric_cols, "cancer_sequencer")
 
-    #print("\n=== By cancer type ===")
-    #print(results_cancer[["metric","H_stat","p_value","significant"]].to_string())
+    print("=== By sequencer ===")
+    print(results_seq_st[["metric","H_stat","p_value","significant"]].to_string())
 
-    #print("\n=== By sequencer and cancer type ===")
-    #print(results_both[["metric","H_stat","p_value","significant"]].to_string())
+    print("\n=== By cancer type ===")
+    print(results_cancer[["metric","H_stat","p_value","significant"]].to_string())
+
+    print("\n=== By sequencer and cancer type ===")
+    print(results_both_st[["metric","H_stat","p_value","significant"]].to_string())
 
 
 

@@ -92,15 +92,14 @@ if __name__ == "__main__":
         "--step",
         choices=[
             "ingest",
-            "preprocess",
-            "train",
+            "preprocess_train",
             "evaluate",
             "all",
         ],
         required=True,
         help=(
             "Pipeline step to run: "
-            "ingest, preprocess, train, evaluate or all"
+            "ingest, preprocess_train, evaluate or all"
         ),
     )
 
@@ -138,14 +137,7 @@ if __name__ == "__main__":
 
         ingest_data()
 
-    elif args.step == "preprocess":
-
-        run_preprocess(
-            args.assay,
-            args.version,
-        )
-
-    elif args.step == "train":
+    elif args.step == "preprocess_train":
 
         X_train, X_test, train_meta, test_meta = run_preprocess(
             args.assay,
@@ -185,7 +177,7 @@ if __name__ == "__main__":
 
     elif args.step == "all":
 
-        run_ingest()
+        ingest_data()
 
         results = run_train_and_evaluate(
             args.assay,
