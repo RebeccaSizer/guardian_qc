@@ -68,6 +68,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from sklearn.preprocessing import RobustScaler
 from sklearn.decomposition import PCA
+from scipy import stats
 
 metric_cols = [
         "bcftools_ts",
@@ -87,7 +88,7 @@ metric_cols = [
         "picard_at_dropout",
         "picard_gc_dropout",
         "picard_fold_enrichment",
-        "picard_fold80",
+        #"picard_fold80",
         "picard_mean_target_coverage",
         "picard_median_target_coverage",
         "picard_target_bases_20x",
@@ -881,29 +882,71 @@ def ingest_data():
     return summary_qc_metrics_df
 
 
-
-
-#test functions in script
 if __name__ == "__main__":
     df = ingest_data()
     df_metrics = df.copy()
 
-    df_st = df_metrics(df_metrics['cancer_type'] == 'solid_tumour') | (df_metrics['cancer_type'] == 'solid_tumour_v3').copy()
+    df_st = df_metrics[
+        (df_metrics['cancer_type'] == 'solid_tumour') |
+        (df_metrics['cancer_type'] == 'solid_tumour_v3')
+    ].copy()
 
-    df_haem = df_metrics(df_metrics['cancer_type'] == 'haem_v2') | (df_metrics['cancer_type'] == 'haem_v3').copy()
+    df_haem = df_metrics[
+        (df_metrics['cancer_type'] == 'haem_v2') |
+        (df_metrics['cancer_type'] == 'haem_v3')
+    ].copy()
 
-    results_seq_st   = test_group_differences(df_st, metric_cols, "sequencer")
-    results_seq_haem   = test_group_differences(df_haem, metric_cols, "sequencer")
+    results_seq_st = test_group_differences(
+        df_st, metric_cols, "sequencer"
+    )
 
-    results_cancer = test_group_differences(df_qc_metrics, metric_cols, "cancer_type")
-    results_both_st = test_group_differences(df_st, metric_cols, "assay_type")
-    results_both_haem = test_group_differences(df_haem, metric_cols, "assay_type")
+    results_seq_haem = test_group_differences(
+        df_haem, metric_cols, "sequencer"
+    )
 
-    print("=== By sequencer ===")
-    print(results_seq_st[["metric","H_stat","p_value","significant"]].to_string())
+    results_cancer = test_group_differences(
+        df_metrics, metric_cols, "cancer_type"
+    )
+
+    results_both_st = test_group_differences(
+        df_st, metric_cols, "assay_type"
+    )
+
+    results_both_haem = test_group_differences(
+        df_haem, metric_cols, "assay_type"
+    )
+
+    print("=== By sequencer (ST) ===")
+    print(
+        results_seq_st[
+            ["metric", "H_stat", "p_value", "significant"]
+        ].to_string()
+    )
+
+    print("\n=== By sequencer (Haem) ===")
+    print(
+        results_seq_haem[
+            ["metric", "H_stat", "p_value", "significant"]
+        ].to_string()
+    )
 
     print("\n=== By cancer type ===")
-    print(results_cancer[["metric","H_stat","p_value","significant"]].to_string())
+    print(
+        results_cancer[
+            ["metric", "H_stat", "p_value", "significant"]
+        ].to_string()
+    )
 
-    print("\n=== By sequencer and cancer type ===")
-    print(results_both_st[["metric","H_stat","p_value","significant"]].to_string())
+    print("\n=== By assay type (ST) ===")
+    print(
+        results_both_st[
+            ["metric", "H_stat", "p_value", "significant"]
+        ].to_string()
+    )
+
+    print("\n=== By assay type (Haem) ===")
+    print(
+        results_both_haem[
+            ["metric", "H_stat", "p_value", "significant"]
+        ].to_string()
+    )
