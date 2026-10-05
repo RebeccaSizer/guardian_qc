@@ -430,7 +430,7 @@ def filter_run_qc(df):
         q30 = run_columns["Percent Q30"]
         error_rate = run_columns["Error Rate"]
 
-        if q30 >= 80 and error_rate <= 2 or q30 < 80 and error_rate == "NaN":
+        if q30 >= 80 and (error_rate <= 2 or pd.isna(error_rate)):
             status = "Yes"
         elif q30 < 80 and error_rate <= 2:
             status = "Percent Q30 < 80"

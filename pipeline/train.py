@@ -343,5 +343,5 @@ if __name__ == "__main__":
     X_train_haem, X_test_haem, train_meta_haem, test_meta_haem = run_preprocessing(config.SUMMARY_QC_METRICS, 'haem', out_dir=None)
     X_train_ST, X_test_ST, train_meta_ST, test_meta_ST = run_preprocessing(config.SUMMARY_QC_METRICS, 'ST', out_dir=None)
 
-    run_model_train(X_train_haem, X_test_haem, train_meta_haem, test_meta_haem, 'haem', 0.05, os.path.join('models/trained', 'haem'))
-    run_model_train(X_train_ST, X_test_ST, train_meta_ST, test_meta_ST, 'ST', 0.20, os.path.join('models/trained', 'ST'))
+    run_model_train(X_train_haem, X_test_haem, train_meta_haem, test_meta_haem, 'haem', 0.08, os.path.join('models/trained', 'haem'))
+    run_model_train(X_train_ST, X_test_ST, train_meta_ST, test_meta_ST, 'ST', 0.15, os.path.join('models/trained', 'ST'))
