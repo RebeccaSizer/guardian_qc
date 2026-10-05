@@ -55,20 +55,56 @@ filter_df()
 filter_run_qc()
     filters the dataframe to include only runs that pass run level QC metrics.
 
+
+Graph functions
+----------------
+pie_chart_run_metric_pass_rate()
+    plots a pie chart showing the proportion of runs passing/failing qc, and the 
+    reasons why
+
+bar_chart_sample_count_by_sequencer_and_cancer_type()
+    plots a bar chart showning the number of samples per sequencing, cancer type,
+    and capture version. 
+
+comparing_sequencer_cancer_type()
+    plots a PCA graph for each metric split across sequencer, and cancer_type + 
+    capture version. 
+
+test_group_differences()
+    calculates the statistical difference between groups (sequencer, cancer_type 
+    + version)
+
+
+Overall ingestion function
+--------------------------
+ingest_data()
+    Pulls in file paths, filters by run qc metrics, extract sample qc
+    metrics and place into a dataframe. 
+
 date:	2026-02-03
 author:	Rebecca Sizer
 
 """
+
+##############################
 # Import necessary modules
+##############################
+
 from utils.logger import logging
 from qc.inter_op import inter_op_qc
 import config
 from pathlib import Path
 import pandas as pd
 import matplotlib.pyplot as plt
+from statsmodels.stats.multitest import multipletests
+from scipy.stats import kruskal
 from sklearn.preprocessing import RobustScaler
 from sklearn.decomposition import PCA
 from scipy import stats
+
+#################################
+# Set script variables
+#################################
 
 metric_cols = [
         "bcftools_ts",
@@ -99,6 +135,10 @@ metric_cols = [
         #"fastqc_basic_status", This metric is str
         "fastp_duplication_rate",
     ]
+
+#####################################
+# Inget data functions 
+#####################################
 
 # This function gets the sample name from the file path 
 def get_qc_summary_file_path():
@@ -463,6 +503,7 @@ def filter_run_qc(df):
             run_folder_name = Path(run_folder_path).name
 
             run_df = inter_op_qc(run_folder_path)
+            print(run_df)
 
             # Get Lane information to select correct values from the run_qc pulled using interop
             if pd.notna(row["sequencer"]) and "novaseqx" in row["sequencer"].lower():
@@ -489,10 +530,11 @@ def filter_run_qc(df):
             else:
                 raise ValueError(f"Unexpected sequencer type: {row['sequencer']}")
 
-            q30 = run_columns["Percent Q30"]
-            error_rate = run_columns["Error Rate"]
+            q30 = pd.to_numeric(run_columns["Percent Q30"], errors="coerce")
+            error_rate = pd.to_numeric(run_columns["Error Rate"], errors="coerce")
 
-            if q30 >= 80 and error_rate <= 2 or q30 < 80 and error_rate == "NaN":
+            if q30 >= 80 and (error_rate <= 2 or pd.isna(error_rate)):
+                logging.info(f'q30:{q30}, error rate:{error_rate}')
                 status = "Yes"
             elif q30 < 80 and error_rate <= 2:
                 status = "Percent Q30 < 80"
@@ -506,13 +548,14 @@ def filter_run_qc(df):
                 "pass_run_qc": status
             })
 
-            df_pass = df.merge(pd.DataFrame(pass_list), 
-                            how="left", 
-                            left_on="seq_run_number", 
-                            right_on="seq_run_number")
+        df_pass = df.merge(pd.DataFrame(pass_list), 
+                        how="left", 
+                        left_on="seq_run_number", 
+                        right_on="seq_run_number")
 
         logging.info(df_pass["pass_run_qc"].value_counts())
 
+        # Return data frame of all with pass_run_qc column present
         return df_pass 
 
     except KeyError as e:
@@ -595,7 +638,7 @@ def sample_level_qc(df):
     try:
         for _, row in df.iterrows():
 
-            if row["pass_run_qc"] == "Yes":
+            if row["pass_run_qc"] == "Yes": # Only pull for samples that pass run QC 
 
                 summary_qc_file_path = row["qc_file_path"]
                 sample_qc = extract_values_from_qc_summary(summary_qc_file_path)
@@ -648,10 +691,6 @@ def pie_chart_run_metric_pass_rate(df):
         pctdistance=1.1,
     )
 
-    # Move the two smallest percentages
-    autotexts[1].set_position((0.3, 1.06))
-    autotexts[2].set_position((-0.03, 1.1))
-
     # Equal aspect ratio keeps the pie circular
     ax.axis("equal")
 
@@ -702,14 +741,15 @@ def bar_chart_sample_count_by_sequencer_and_cancer_type(df):
 def comparing_sequencer_cancer_type(df):
 
     # Scale
-    X = df[metric_cols].fillna(df[metric_cols].median())
+    df_copy = df.copy()
+    X = df_copy[metric_cols].fillna(df_copy[metric_cols].median())
     X_scaled = RobustScaler().fit_transform(X)
 
     # PCA
     pca = PCA(n_components=2)
     coords = pca.fit_transform(X_scaled)
-    df["PC1"] = coords[:, 0]
-    df["PC2"] = coords[:, 1]
+    df_copy["PC1"] = coords[:, 0]
+    df_copy["PC2"] = coords[:, 1]
 
     loadings = pd.DataFrame(
         pca.components_.T,
@@ -727,9 +767,9 @@ def comparing_sequencer_cancer_type(df):
     fig, axes = plt.subplots(1, 3, figsize=(18, 5))
 
     # By sequencer
-    for seq in df["sequencer"].unique():
-        mask = df["sequencer"] == seq
-        axes[0].scatter(df.loc[mask,"PC1"], df.loc[mask,"PC2"],
+    for seq in df_copy["sequencer"].unique():
+        mask = df_copy["sequencer"] == seq
+        axes[0].scatter(df_copy.loc[mask,"PC1"], df_copy.loc[mask,"PC2"],
                         label=seq, alpha=0.3, s=6)
 
     axes[0].set_title("By sequencer")
@@ -738,19 +778,20 @@ def comparing_sequencer_cancer_type(df):
     axes[0].legend(markerscale=4, fontsize=8)
 
     # By cancer type
-    for ct in df["cancer_type"].unique():
-        mask = df["cancer_type"] == ct
-        axes[1].scatter(df.loc[mask,"PC1"], df.loc[mask,"PC2"],
+    for ct in df_copy["cancer_type"].unique():
+        mask = df_copy["cancer_type"] == ct
+        axes[1].scatter(df_copy.loc[mask,"PC1"], df_copy.loc[mask,"PC2"],
                         label=ct, alpha=0.3, s=6)
     axes[1].set_title("By cancer type")
     axes[1].set_xlabel(f"PC1 ({var1:.1f}%)")
     axes[1].legend(markerscale=4, fontsize=8)
 
     # By both — combine labels
-    df["group"] = df["sequencer"] + " | " + df["cancer_type"]
-    for grp in df["group"].unique():
-        mask = df["group"] == grp
-        axes[2].scatter(df.loc[mask,"PC1"], df.loc[mask,"PC2"],
+    
+    df_copy["group"] = df_copy["sequencer"] + " | " + df_copy["cancer_type"]
+    for grp in df_copy["group"].unique():
+        mask = df_copy["group"] == grp
+        axes[2].scatter(df_copy.loc[mask,"PC1"], df_copy.loc[mask,"PC2"],
                         label=grp, alpha=0.3, s=6)
     axes[2].set_title("By sequencer + cancer type")
     axes[2].set_xlabel(f"PC1 ({var1:.1f}%)")
@@ -771,36 +812,40 @@ def test_group_differences(df, cols, group_col):
 
     results = []
 
-    groups = df[group_col].dropna().unique()
-    print(groups)
+    for metric in metric_cols:
+        groups = [
+            group[metric].dropna()
+            for _, group in df.groupby(group_col)
+        ]
 
-    for col in cols:
-
-        group_data = {
-            g: df.loc[df[group_col] == g, col].dropna().values
-            for g in groups
-        }
-
-        # Only test if all groups have >1 observation
-        if all(len(values) > 1 for values in group_data.values()):
-
-            stat, p = stats.kruskal(*group_data.values())
+        if all(len(group) > 1 for group in groups):
+            stat, p_value = kruskal(*groups)
 
             results.append({
-                "metric": col,
-                "group_by": group_col,
-                "H_stat": round(stat, 3),
-                "p_value": p,
-                "significant": p < 0.05,
-                "n_min": min(len(values) for values in group_data.values()),
-                "n_max": max(len(values) for values in group_data.values()),
-                "group_sizes": {
-                    g: len(values)
-                    for g, values in group_data.items()
-                }
+                "metric": metric,
+                "statistic": stat,
+                "p_value": p_value
             })
 
-    return pd.DataFrame(results).sort_values("p_value")
+    if not results:
+        return pd.DataFrame()
+
+    results_df = pd.DataFrame(results)
+
+    # Benjamini-Hochberg FDR correction
+    _, p_values_corrected, _, _ = multipletests(
+        results_df["p_value"],
+        alpha=0.05,
+        method="fdr_bh"
+    )
+
+    results_df["p_value_corrected"] = p_values_corrected
+
+    results_df["significant"] = (
+        results_df["p_value_corrected"] < 0.05
+    )
+
+    return results_df.sort_values("p_value_corrected")
 
 
 ###################################################
@@ -883,9 +928,14 @@ def ingest_data():
 
 
 if __name__ == "__main__":
+
+    # Ingest the data 
     df = ingest_data()
+
+    # Create a copy to create graphs
     df_metrics = df.copy()
 
+    # split data by cancer type for stats
     df_st = df_metrics[
         (df_metrics['cancer_type'] == 'solid_tumour') |
         (df_metrics['cancer_type'] == 'solid_tumour_v3')
@@ -896,6 +946,8 @@ if __name__ == "__main__":
         (df_metrics['cancer_type'] == 'haem_v3')
     ].copy()
 
+
+    # Complete stats tests
     results_seq_st = test_group_differences(
         df_st, metric_cols, "sequencer"
     )
@@ -919,34 +971,34 @@ if __name__ == "__main__":
     print("=== By sequencer (ST) ===")
     print(
         results_seq_st[
-            ["metric", "H_stat", "p_value", "significant"]
+            ["metric", "p_value_corrected", "p_value", "significant"]
         ].to_string()
     )
 
     print("\n=== By sequencer (Haem) ===")
     print(
         results_seq_haem[
-            ["metric", "H_stat", "p_value", "significant"]
+            ["metric", "p_value_corrected", "p_value", "significant"]
         ].to_string()
     )
 
     print("\n=== By cancer type ===")
     print(
         results_cancer[
-            ["metric", "H_stat", "p_value", "significant"]
+            ["metric", "p_value_corrected", "p_value", "significant"]
         ].to_string()
     )
 
     print("\n=== By assay type (ST) ===")
     print(
         results_both_st[
-            ["metric", "H_stat", "p_value", "significant"]
+            ["metric", "p_value_corrected", "p_value", "significant"]
         ].to_string()
     )
 
     print("\n=== By assay type (Haem) ===")
     print(
         results_both_haem[
-            ["metric", "H_stat", "p_value", "significant"]
+            ["metric", "p_value_corrected", "p_value", "significant"]
         ].to_string()
     )

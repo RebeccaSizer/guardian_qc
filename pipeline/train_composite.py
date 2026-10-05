@@ -57,19 +57,13 @@ import logging
 import numpy as np
 import pandas as pd
 import joblib
- 
 from sklearn.ensemble import IsolationForest
 from pipeline.preprocess import run_preprocessing
 from outputs.graphs.train.train_graphs import plot_score_distribution, plot_flagging_rates, plot_top_deviant_features, evaluate_with_labels
 from utils.logger import logging
 import config
 import argparse
- 
-N_ESTIMATORS = 100 # The number of base estimators in the ensemble (Number of decision trees) - can up to 300 if needed
-RANDOM_STATE = 42 # Controls the pseudo-randomness of the selection of the features and the split values - needed to build a reproducible random sequence
- 
-# Top features to report
-TOP_N_FEATURES = 3
+
  
 # Unsupervised model training
 # Isolation forest
@@ -94,9 +88,9 @@ def fit_isolation_forest(X_train: pd.DataFrame, assay: str, version: str, contam
                  f"contamination={contamination}")
    
     model = IsolationForest(
-        n_estimators=N_ESTIMATORS,
+        n_estimators=config.N_ESTIMATORS,
         contamination=contamination,
-        random_state=RANDOM_STATE,
+        random_state=config.RANDOM_STATE,
         n_jobs=-1 #run jobs in parallel
     )
 
@@ -171,7 +165,7 @@ def score_samples(model: IsolationForest, X: pd.DataFrame, assay: str, version: 
 def explain_outlier(
     sample: pd.Series,
     X_train: pd.DataFrame,
-    top_n: int = TOP_N_FEATURES,
+    top_n: int = config.TOP_N_FEATURES,
     ) -> pd.DataFrame:
     """
     For a single flagged sample, rank features by how far they deviate
@@ -223,7 +217,7 @@ def explain_all_outliers(
         version: str,
         out_dir: str,
         split: str,
-        top_n: int = TOP_N_FEATURES,
+        top_n: int = config.TOP_N_FEATURES,
     ) -> pd.DataFrame:
     """
     Apply explain_outlier to every flagged sample in a scored DataFrame.
@@ -318,8 +312,8 @@ def run_model_train(X_train, X_test, train_meta, test_meta, assay, version, spli
     train_results = attach_metadata(X_train_scored, train_meta)
     test_results  = attach_metadata(X_test_scored,  test_meta)
 
-    X_train_scored_explained = explain_all_outliers(train_results, X_train, assay, version, out_dir, 'train', TOP_N_FEATURES)
-    X_test_scored_explained = explain_all_outliers(test_results, X_train, assay, version, out_dir, 'test', TOP_N_FEATURES)
+    X_train_scored_explained = explain_all_outliers(train_results, X_train, assay, version, out_dir, 'train', config.TOP_N_FEATURES)
+    X_test_scored_explained = explain_all_outliers(test_results, X_train, assay, version, out_dir, 'test', config.TOP_N_FEATURES)
 
     print(X_test_scored_explained)
 

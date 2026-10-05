@@ -1,16 +1,3 @@
-import pandas as pd
-import config
-import numpy as np
-import os 
-from utils.logger import logging
-from sklearn.preprocessing import OneHotEncoder, StandardScaler, RobustScaler
-from sklearn.impute import SimpleImputer
-from sklearn.feature_selection import VarianceThreshold
-from sklearn.model_selection import train_test_split
-from outputs.graphs.preprocessing.preprocessing_graphs import plot_correlation_matrix,   plot_feature_distributions
-import joblib
-from pathlib import Path
-import argparse
 """
 guardian_qc preprocessing.py
 
@@ -169,6 +156,9 @@ run_preprocessing()
     Run the complete preprocessing workflow and return the processed
     training and test feature matrices.
 
+Graphs
+------
+
 
 Data leakage prevention
 -----------------------
@@ -182,6 +172,30 @@ parameters used during model development.
 Date: 2026-08-18
 Author: Rebecca Sizer
 """
+
+####################
+# Imports
+####################
+
+import pandas as pd
+import config
+import numpy as np
+import os 
+from utils.logger import logging
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.preprocessing import OneHotEncoder, StandardScaler, RobustScaler
+from sklearn.impute import SimpleImputer
+from sklearn.feature_selection import VarianceThreshold
+from sklearn.model_selection import train_test_split
+from outputs.graphs.preprocessing.preprocessing_graphs import plot_correlation_matrix,   plot_feature_distributions
+import joblib
+from pathlib import Path
+import argparse
+
+#######################################
+# Functions to preprocess for ML model
+#######################################
 
 # Load and audit the raw qc summary data
 def load_data(file_path):
@@ -206,7 +220,7 @@ def load_data(file_path):
 def explore_qc_data(data_frame):
     """
     This function explores the data and reports:
-        - Number ofd Rows
+        - Number of Rows
         - Number of Columns
         - Number of samples split by sequencer and cancer type
         - Number of duplicated rows
@@ -283,6 +297,7 @@ def fix_data_types(data_frame):
     try:
         logging.info('Removing rows with missing values')
         data_frame = data_frame[data_frame['picard_fold80'] != '?']
+        data_frame['picard_fold80'] = pd.to_numeric(data_frame['picard_fold80'], errors='coerce')
         return data_frame
 
     except KeyError as e:
@@ -296,17 +311,17 @@ def separate_data(df: pd.DataFrame, assay_type: str, version: str) -> pd.DataFra
     from here on.
 
     ST:
-        NovaSeq X + solid_tumour_v3
+        NovaSeq X + solid_tumour or solid_tumour_v3
 
     Haem:
-        NovaSeq X + haem_v3
+        NovaSeq X + haem_v2 or haem_v3
 
     params
         df : pd.DataFrame
             Cleaned QC dataframe.
 
         assay_type : str
-            Either "ST" or "haem".
+            Either "st" or "haem".
 
         version : str
             Either v2, v3 or v2_v3 for both 
@@ -373,7 +388,7 @@ def separate_data(df: pd.DataFrame, assay_type: str, version: str) -> pd.DataFra
             f"Cancer/pipeline versions:\n"
             f"{filtered_df['cancer_type'].value_counts().to_string()}"
         )
-        filtered_df.to_csv(f"data/processed/split_data_only_{assay_type}_{version}.csv")
+        
         return filtered_df
 
 
@@ -477,7 +492,7 @@ def fit_imputer(train_df: pd.DataFrame) -> SimpleImputer:
         SimpleImputer trained on the training data
     """
     try:
-        imputer = SimpleImputer(strategy = 'mean')
+        imputer = SimpleImputer(strategy = 'median')
         imputer.fit(train_df)
         logging.info('Imputer fitted on training data')
         return imputer
@@ -507,7 +522,7 @@ def apply_imputer(df: pd.DataFrame, imputer: SimpleImputer) -> pd.DataFrame:
 
     except Exception as e:
         logging.error(f"Error applying imputer: {e}")
-    raise
+        raise
 
 
 # Scale the data: Use standard scaler first, 
@@ -531,6 +546,7 @@ def fit_standard_scaler(train_df: pd.DataFrame):
 
     except Exception as e:
         logging.error(f"Error what fitting the standard scaler: {e}")
+        raise
     
 def apply_standard_scaler(df: pd.DataFrame, scaler: StandardScaler) -> pd.DataFrame:
 
@@ -550,7 +566,7 @@ def apply_standard_scaler(df: pd.DataFrame, scaler: StandardScaler) -> pd.DataFr
         return scaled_df
     except Exception as e:
         logging.error(f"Error when applying the standard scaler: {e}")
-
+        raise
 
 # Robust scaler for future use 
 def fit_robust_scaler(train_df: pd.DataFrame):
@@ -613,7 +629,7 @@ def save_transformers(ohe, imputer, scaler, vt, to_drop_columns, out_dir: str) -
 
     except Exception as e:
         logging.error(f"Error saving transformers: {e}")
-
+        raise
 
 # Feature selection
 # Identify columns that have very little variance
@@ -701,6 +717,125 @@ def find_correlated_features(X_train, threshold=0.95):
 
     return pd.DataFrame(correlated_pairs)
 
+######################
+# Graph Functions 
+######################
+
+# Plot a correlation matrix to determine which features to keep
+def plot_correlation_matrix(X_train: pd.DataFrame, assay: str, out_dir: str) -> None:
+    corr = X_train.corr()
+
+    fig, ax = plt.subplots(figsize=(16, 14))
+
+    out_dir = Path(out_dir)
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    
+    sns.heatmap(
+        corr,
+        annot=True,           # show values in cells
+        fmt=".2f",            # 2 decimal places
+        cmap="coolwarm",      # blue = negative, red = positive
+        center=0,
+        vmin=-1, vmax=1,
+        square=True,
+        linewidths=0.5,
+        ax=ax
+    )
+
+    ax.set_title(f"Feature correlation matrix — {assay}", fontsize=14)
+    plt.tight_layout()
+    plt.savefig(f"{out_dir}/correlation_matrix_{assay}.png", dpi=150)
+    plt.close()
+
+
+def plot_feature_distributions(
+    df,
+    features,
+    assay_col="assay",
+    out_dir=None):
+
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    for feature in features:
+
+        # Make a copy and convert the feature to numeric
+        plot_df = df.copy()
+        plot_df[feature] = pd.to_numeric(
+            plot_df[feature],
+            errors="coerce"
+        )
+
+        # Remove missing values for this feature
+        plot_df = plot_df.dropna(
+            subset=[feature, assay_col]
+        )
+
+        if plot_df.empty:
+            logging.warning(
+                f"No numeric data available for {feature}; skipping plot."
+            )
+            continue
+
+        # Create one panel per assay
+        g = sns.FacetGrid(
+            plot_df,
+            col=assay_col,
+            height=3,
+            sharex=False,
+            sharey=False
+        )
+
+        g.map(
+            sns.histplot,
+            feature,
+            kde=True
+        )
+
+        g.set_titles("{col_name}")
+        g.figure.suptitle(feature, y=1.02)
+
+        # Set a separate x-axis range for EACH assay
+        for ax, assay in zip(g.axes.flat, g.col_names):
+
+            assay_values = plot_df.loc[
+                plot_df[assay_col] == assay,
+                feature
+            ].dropna()
+
+            if assay_values.empty:
+                continue
+
+            min_val = assay_values.min()
+            max_val = assay_values.max()
+
+            data_range = max_val - min_val
+
+            # Handle constant features
+            if data_range == 0:
+                padding = max(abs(min_val) * 0.05, 1)
+            else:
+                padding = data_range * 0.05
+
+            ax.set_xlim(
+                min_val - padding,
+                max_val + padding
+            )
+
+        plt.tight_layout()
+
+        g.figure.savefig(
+            out_dir / f"dist_{feature}.png",
+            dpi=120,
+            bbox_inches="tight"
+        )
+
+        plt.close(g.figure)
+
+        logging.info(
+            f"Feature distribution plot saved: {feature}"
+        )
 
 
 # Run preprocessing 
@@ -740,6 +875,18 @@ def run_preprocessing(file_path: str, assay: str, version: str, out_dir: None):
     # Clean the data
     df = remove_duplicates(df)
     df = fix_data_types(df)
+    df.to_csv(config.SUMMARY_QC_METRICS_CLEANED, sep='\t', index=False)
+
+
+    plot_feature_distributions(
+            df,
+            config.MODEL_FEATURES,
+            assay_col="assay_type",
+            out_dir=os.path.join(
+                config.PREPROCESSING_PLOT_DIR,
+                "feature_distribution"
+            )
+        )
 
     # Filter to the requested production assay
     df = separate_data(
@@ -759,8 +906,8 @@ def run_preprocessing(file_path: str, assay: str, version: str, out_dir: None):
 
     # Isolate the metadata to save 
     try:
-        train_meta = train_df[["sample_name", "cancer_type", "sequencer", "assay_type", "worklist"]].copy()  # keep assay label for per-assay plots later
-        test_meta  = test_df[["sample_name", "cancer_type", "sequencer", "assay_type", "worklist"]].copy()
+        train_meta = train_df[config.METADATA_COLUMNS].copy()  # keep assay label for per-assay plots later
+        test_meta  = test_df[config.METADATA_COLUMNS].copy()
 
     except KeyError as e:
         logging.info(f"Missing column from data for preprocessing: {e}")
@@ -808,10 +955,11 @@ def run_preprocessing(file_path: str, assay: str, version: str, out_dir: None):
 
     # Remove correlated features to prevent too much weight on certian features 
     correlated = find_correlated_features(X_train)
-    logging.info(f'Analysing correlation between features: {print(correlated)}')
+    logging.info(f'Analysing correlation between features: \n{correlated}')
 
-    plot_correlation_matrix(X_train, assay, os.path.join('outputs/graphs/preprocessing/metric_correlation_matrix_all_columns/'))
-
+    plot_correlation_matrix(X_train, assay, os.path.join(config.PREPROCESSING_PLOT_DIR, 'metric_correlation_matrix_all_columns'))
+    logging.info(f"Correlation matrix saved for assay: {assay}")
+    
     if assay.lower() == 'haem':
         columns_to_drop = [
             'bcftools_ts',
@@ -825,6 +973,7 @@ def run_preprocessing(file_path: str, assay: str, version: str, out_dir: None):
             'picard_target_bases_30x',
             'picard_target_bases_50x'
         ]
+
     elif assay.lower() == 'st':
         columns_to_drop = [
             'picard_total_reads',
@@ -838,7 +987,6 @@ def run_preprocessing(file_path: str, assay: str, version: str, out_dir: None):
             'picard_target_bases_20x',
             'picard_target_bases_30x',
             'picard_target_bases_50x'
-
         ]
 
     # Only drop columns that are actually present
@@ -847,23 +995,19 @@ def run_preprocessing(file_path: str, assay: str, version: str, out_dir: None):
         if column in X_train.columns
     ]
 
-    logging.info(
-        f"Dropping {len(to_drop)} columns due to high correlation: {to_drop}"
-    )
-
     logging.info(f'Dropping {len(to_drop)} columns due to high correlation: {to_drop}')
 
     X_train = X_train.drop(columns=to_drop)
     X_test = X_test.drop(columns=to_drop)
 
-    plot_correlation_matrix(X_train, assay, os.path.join('outputs/graphs/preprocessing/metric_correlation_matrix_filtered/'))
+    plot_correlation_matrix(X_train, assay, os.path.join(config.PREPROCESSING_PLOT_DIR, 'metric_correlation_matrix_filtered/'))
+    logging.info(f"Correlation matrix post processing saved for assay: {assay}")
 
     if out_dir is not None:
         save_transformers(ohe, imputer, scaler, vt, to_drop, out_dir)
 
     logging.info(f"Preprocessing complete. X_train: {X_train.shape} | X_test: {X_test.shape}")
     return X_train, X_test, train_meta, test_meta
-
 
 if __name__ == "__main__":
 
