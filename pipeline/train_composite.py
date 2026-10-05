@@ -312,6 +312,10 @@ def run_model_train(X_train, X_test, train_meta, test_meta, assay, version, spli
     train_results = attach_metadata(X_train_scored, train_meta)
     test_results  = attach_metadata(X_test_scored,  test_meta)
 
+    # Plot distribution
+    plot_score_distribution(X_train_scored, X_test_scored, assay, os.path.join('outputs/graphs/train', args.assay, args.version))
+    
+
     X_train_scored_explained = explain_all_outliers(train_results, X_train, assay, version, out_dir, 'train', config.TOP_N_FEATURES)
     X_test_scored_explained = explain_all_outliers(test_results, X_train, assay, version, out_dir, 'test', config.TOP_N_FEATURES)
 
@@ -393,8 +397,7 @@ if __name__ == "__main__":
 
     explained_model_train, explained_model_test = run_model_train(X_train, X_test, train_meta, test_meta, args.assay, args.version, args.split, contamination, os.path.join('data/processed/from_model/', args.assay ))
 
-    plot_score_distribution(explained_model_train, explained_model_test, args.assay, os.path.join('outputs/graphs/train', args.assay, args.version))
-
+    
     #plot_flagging_rates(flagging_rate, 'outputs/graphs/train/')
 
     #plot_top_deviant_features(X_train_scored_explained, 'haem_train', 'outputs/graphs/train/haem/', 10)
