@@ -245,6 +245,8 @@ def explain_all_outliers(
  
     Returns a long-format DataFrame with one row per (sample, feature).
     """
+    os.makedirs(out_dir, exist_ok=True)
+
     flagged = X_scored[X_scored["anomaly_label"] == -1]
     logging.info(f"[{assay}_{version}] Explaining {len(flagged)} flagged samples...")
  
@@ -318,19 +320,71 @@ def attach_metadata(X_scored: pd.DataFrame, meta: pd.DataFrame) -> pd.DataFrame:
     return merged
 
 def explain_outliers_shap(X_scored: pd.DataFrame,
-    model, features, out_dir
+    model, features, assay, version, out_dir
     ) -> pd.DataFrame:
-
+    
+    os.makedirs(out_dir, exist_ok=True)
+    
     explainer = shap.TreeExplainer(model)
-    shap_values = explainer(X_scored).values
 
-    print(shap_values.shape)
-    print(X_scored.shape)
+    outliers = (X_scored["anomaly_label"] == -1).to_numpy()
+    normal = (X_scored["anomaly_label"] == 1).to_numpy()
 
-    shap.plot.waterfall(shap_values[0])
-    shap.plot.waterfall(shap_values[2])
-    shap.plots.bar(shap_values)
-    shap.plots.beeswarm(shap_values)
+    X_explain_global = X_scored[features]
+    shap_values = explainer(X_explain_global)
+
+    shap_outliers = shap_values[outliers]
+    shap_normal = shap_values[normal]   
+
+    shap.plots.waterfall(shap_outliers[1])
+    plt.savefig(
+        os.path.join(out_dir, assay, version, "shap_waterfall_sample_outlier.png"),
+        bbox_inches="tight",
+        dpi=300
+    )
+    plt.close()
+    shap.plots.waterfall(shap_normal[1])
+    plt.savefig(
+        os.path.join(out_dir, assay, version, "shap_waterfall_sample_normal.png"),
+        bbox_inches="tight",
+        dpi=300
+    )
+    plt.close()
+    # Outliers
+    shap.plots.bar(shap_outliers, show=False)
+    plt.savefig(
+        os.path.join(out_dir, assay, version, "shap_bar_outliers.png"),
+        bbox_inches="tight",
+        dpi=300
+    )
+    plt.close()
+
+    # Normal
+    shap.plots.bar(shap_normal, show=False)
+    plt.savefig(
+        os.path.join(out_dir, assay, version, "shap_bar_normal.png"),
+        bbox_inches="tight",
+        dpi=300
+    )
+    plt.close()
+  
+    shap.plots.beeswarm(shap_outliers, show=False)
+    plt.savefig(
+        os.path.join(out_dir, assay, version, "shap_beeswarm_outliers.png"),
+        bbox_inches="tight",
+        dpi=300
+    )
+    plt.close()
+
+    shap.plots.beeswarm(shap_normal, show=False)
+    plt.savefig(
+        os.path.join(out_dir, assay, version, "shap_beeswarm_normal.png"),
+        bbox_inches="tight",
+        dpi=300
+    )
+    plt.close()
+
+    return shap_values
 
 ############################
 # Graphs
@@ -346,6 +400,8 @@ def plot_score_distribution(
     Plot the distribution of anomaly scores for train and test sets.
     The vertical dashed line at x=0 is the decision boundary — left = flagged.
     """
+    os.makedirs(out_dir, exist_ok=True)
+
     fig, axes = plt.subplots(1, 2, figsize=(14, 5), sharey=False)
     fig.suptitle(f"Anomaly score distribution — {assay}", fontsize=13)
  
@@ -401,6 +457,8 @@ def plot_top_deviant_features(
     deviant features across all flagged samples for an assay.
     Helps identify which QC metrics are driving the most flags.
     """
+    os.makedirs(out_dir, exist_ok=True)
+
     if explanations.empty:
         return
  
@@ -426,6 +484,8 @@ def plot_top_deviant_features(
     logging.info(f"[{assay}] Top deviant features plot saved to {out_path}")
 
 def plot_anomaly_score(X_scored, assay, version):
+
+    os.makedirs(out_dir, exist_ok=True)
 
     plt.figure(figsize=(10, 5))
 
@@ -454,10 +514,9 @@ def plot_anomaly_score(X_scored, assay, version):
     plt.ylabel("Anomaly score")
     plt.legend()
 
-    output_path = (
-        Path(config.TRAINING_PLOT_DIR)
-        / f"anomaly_score_scatter_{assay}_{version}.png"
-    )
+    output_path = os.path.join(config.TRAINING_PLOT_DIR, assay, version,
+        f"anomaly_score_scatter_{assay}_{version}.png")
+    
 
     plt.savefig(output_path, bbox_inches="tight")
     plt.close()
@@ -467,6 +526,7 @@ def plot_anomaly_score(X_scored, assay, version):
 #########################
  
 def run_model_train(X_train, X_test, train_meta, test_meta, assay, version, split, contamination, out_dir):
+    os.makedirs(out_dir, exist_ok=True)
 
     model = fit_isolation_forest(X_train, assay, version, contamination)
     save_model(model, assay, version, os.path.join(config.TRAINED_COMPOSITE_MODEL_OUTDIR, args.assay))
@@ -478,9 +538,26 @@ def run_model_train(X_train, X_test, train_meta, test_meta, assay, version, spli
     train_results = attach_metadata(X_train_scored, train_meta)
     test_results  = attach_metadata(X_test_scored,  test_meta)
 
+    if assay == 'haem':
+        features = ['bcftools_tv', 'bcftools_tstv', 'bcftools_snvs', 'bcftools_indels', 
+                    'picard_mode_insert', 'picard_median_insert', 'picard_mad_insert', 
+                    'picard_total_reads', 'picard_pf_q30_bases', 'picard_read_length', 
+                    'picard_at_dropout', 'picard_fold_enrichment', 'picard_fold80', 
+                    'picard_median_target_coverage', 'picard_target_bases_100x', 
+                    'fastqc_duplication_rate', 'fastp_duplication_rate']
+    if assay == 'st':
+        features = ['bcftools_ts', 'bcftools_tv', 'bcftools_tstv', 'bcftools_snvs', 
+                    'bcftools_indels', 'picard_mode_insert', 'picard_median_insert', 
+                    'picard_mad_insert', 'picard_pf_q30_bases', 'picard_read_length', 
+                    'picard_at_dropout', 'picard_gc_dropout', 'picard_fold_enrichment', 
+                    'picard_fold80', 'picard_target_bases_100x', 'fastqc_duplication_rate', 
+                    'fastp_duplication_rate']
+
     # Plot distribution
     plot_score_distribution(X_train_scored, X_test_scored, assay, os.path.join(config.TRAINING_PLOT_DIR, args.assay, args.version))
     plot_anomaly_score(test_results, assay, version)
+    explain_outliers_shap(test_results, model, features, assay, version, config.TRAINING_PLOT_DIR)
+
 
     X_train_scored_explained = explain_all_outliers(train_results, X_train, assay, version, out_dir, 'train', config.TOP_N_FEATURES)
     X_test_scored_explained = explain_all_outliers(test_results, X_train, assay, version, out_dir, 'test', config.TOP_N_FEATURES)
@@ -514,7 +591,6 @@ def run_model_train(X_train, X_test, train_meta, test_meta, assay, version, spli
     model_output_test.to_csv( os.path.join(out_dir, f"{assay}_{version}_test_scored.csv"),  index=True)
     logging.info(f"[{assay}] Scored outputs with metadata saved to {out_dir}")
 
-    print(model_output_train)
     return model_output_train, model_output_test
  
 # ── Entry point ───────────────────────────────────────────────────────────────
