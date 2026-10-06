@@ -634,12 +634,3 @@ if __name__ == "__main__":
     X_train, X_test, train_meta, test_meta = run_preprocessing(config.SUMMARY_QC_METRICS, args.assay, out_dir=None, version=args.version)
 
     explained_model_train, explained_model_test = run_model_train(X_train, X_test, train_meta, test_meta, args.assay, args.version, args.split, contamination, os.path.join('data/processed/from_model/', args.assay ))
-
-    
-    #plot_flagging_rates(flagging_rate, 'outputs/graphs/train/')
-
-    #plot_top_deviant_features(X_train_scored_explained, 'haem_train', 'outputs/graphs/train/haem/', 10)
-    #plot_top_deviant_features(X_test_scored_explained, 'haem_test', 'outputs/graphs/train/haem/', 10)
-
-    #plot_top_deviant_features(X_train_scored_explained, 'st_train', 'outputs/graphs/train/st/', 10)
-    #plot_top_deviant_features(X_test_scored_explained, 'st_test', 'outputs/graphs/train/st/', 10)
