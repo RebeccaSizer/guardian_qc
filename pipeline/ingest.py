@@ -101,6 +101,7 @@ from scipy.stats import kruskal
 from sklearn.preprocessing import RobustScaler
 from sklearn.decomposition import PCA
 from scipy import stats
+import os
 
 #################################
 # Set script variables
@@ -714,15 +715,15 @@ def pie_chart_run_metric_pass_rate(df):
 
     # Save figure
     plt.show()
-    plt.savefig('outputs/graphs/data_exploration/pie_chart_pass_run_qc.png')
+    plt.savefig(os.path.join(config.INGEST_PLOT_DIR, 'pie_chart_pass_run_qc.png'))
 
 
 def bar_chart_sample_count_by_sequencer_and_cancer_type(df):
 
-    counts = df[['sequencer', 'cancer_type']].value_counts().reset_index(name="count")
+    counts = df['assay_type'].value_counts().reset_index(name="count")
 
     # Create a combined label for the x-axis
-    counts["label"] = counts["sequencer"] + ": " + counts["cancer_type"]
+    counts["label"] = counts["assay_type"]
 
     fig, ax = plt.subplots(figsize=(8, 6))
 
@@ -735,14 +736,15 @@ def bar_chart_sample_count_by_sequencer_and_cancer_type(df):
     plt.xticks(rotation=45, ha="right")
 
     plt.tight_layout()
-    plt.savefig('outputs/graphs/data_exploration/sample_count_by_cancer_type_and_sequencer.png')
+    plt.savefig(os.path.join(config.INGEST_PLOT_DIR, 'sample_count_by_cancer_type_and_sequencer.png'))
 
 
 def comparing_sequencer_cancer_type(df):
 
     # Scale
     df_copy = df.copy()
-    X = df_copy[metric_cols].fillna(df_copy[metric_cols].median())
+    metrics = [col for col in metric_cols if col != "picard_gc_dropout"]
+    X = df_copy[metrics].fillna(df_copy[metrics].median())
     X_scaled = RobustScaler().fit_transform(X)
 
     # PCA
@@ -753,7 +755,7 @@ def comparing_sequencer_cancer_type(df):
 
     loadings = pd.DataFrame(
         pca.components_.T,
-        index=metric_cols,
+        index=metrics,
         columns=["PC1", "PC2"]
     )
     print(loadings["PC1"].abs().sort_values(ascending=False).head(10))
@@ -799,7 +801,7 @@ def comparing_sequencer_cancer_type(df):
                 bbox_to_anchor=(1.05, 1), loc='upper left')
 
     plt.tight_layout()
-    plt.savefig("outputs/graphs/data_exploration/pca_by_group.png", dpi=150, bbox_inches="tight")
+    plt.savefig(os.path.join(config.INGEST_PLOT_DIR, "pca_by_group.png"), dpi=150, bbox_inches="tight")
 
 
 def test_group_differences(df, cols, group_col):
@@ -907,13 +909,12 @@ def ingest_data():
 
     df = filter_run_qc(df)
     pie_chart_run_metric_pass_rate(df)
-    
-    bar_chart_sample_count_by_sequencer_and_cancer_type(df)
 
     df.to_csv(config.FILTERED_RUN_QC_DATA, sep="\t", index=False)
 
     # Extract summary QC metrics
     summary_qc_metrics_df = sample_level_qc(df)
+    bar_chart_sample_count_by_sequencer_and_cancer_type(summary_qc_metrics_df)
     comparing_sequencer_cancer_type(summary_qc_metrics_df)
 
     summary_qc_metrics_df.to_csv(config.SUMMARY_QC_METRICS, sep = "\t", index = False)

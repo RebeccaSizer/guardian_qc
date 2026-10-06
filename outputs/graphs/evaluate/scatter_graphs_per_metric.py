@@ -6,6 +6,7 @@ import pandas as pd
 import os
 from utils.logger import logging
 
+
 def plot_metric_scatter_by_label_composite(X_scored: pd.DataFrame, feature_cols: list[str], 
                                  assay: str, version:str, split:str, out_dir: str, 
                                  worklist_col: str = "worklist"):
@@ -85,8 +86,6 @@ def plot_metric_scatter_by_label_composite(X_scored: pd.DataFrame, feature_cols:
     plt.savefig(out_path, dpi=150, bbox_inches="tight")
     plt.close()
     logging.info(f"[{assay}_{version}] Metric scatter plot saved to {out_path}")
-
-
     
 
 if __name__=="__main__":

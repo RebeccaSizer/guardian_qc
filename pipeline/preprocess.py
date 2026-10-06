@@ -603,7 +603,7 @@ def apply_robust_scaler(df: pd.DataFrame, scaler: RobustScaler) -> pd.DataFrame:
 
 
 # Save the transformers
-def save_transformers(ohe, imputer, scaler, vt, to_drop_columns, out_dir: str) -> None:
+def save_transformers(ohe, imputer, scaler, vt, to_drop_columns, assay, version, out_dir: str) -> None:
     """
     This function saves the .pkl files so that this preprocessing can
     be applied to future data.
@@ -620,11 +620,11 @@ def save_transformers(ohe, imputer, scaler, vt, to_drop_columns, out_dir: str) -
     try:
         out_dir = Path(out_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
-        joblib.dump(ohe,     f"{out_dir}/ohe.pkl")
-        joblib.dump(imputer, f"{out_dir}/imputer.pkl")
-        joblib.dump(scaler,  f"{out_dir}/scaler.pkl")
-        joblib.dump(vt,  f"{out_dir}/vt.pkl")
-        joblib.dump(to_drop_columns,  f"{out_dir}/dropped_columns.pkl")
+        joblib.dump(ohe,     f"{out_dir}/{assay}_{version}_ohe.pkl")
+        joblib.dump(imputer, f"{out_dir}/{assay}_{version}_imputer.pkl")
+        joblib.dump(scaler,  f"{out_dir}/{assay}_{version}_scaler.pkl")
+        joblib.dump(vt,  f"{out_dir}/{assay}_{version}_vt.pkl")
+        joblib.dump(to_drop_columns,  f"{out_dir}/{assay}_{version}_dropped_columns.pkl")
         logging.info(f"Transformers saved to {out_dir}/")
 
     except Exception as e:
@@ -837,6 +837,9 @@ def plot_feature_distributions(
             f"Feature distribution plot saved: {feature}"
         )
 
+##########################
+# Run preprocessing (ALL)
+##########################
 
 # Run preprocessing 
 def run_preprocessing(file_path: str, assay: str, version: str, out_dir: None):
@@ -878,15 +881,15 @@ def run_preprocessing(file_path: str, assay: str, version: str, out_dir: None):
     df.to_csv(config.SUMMARY_QC_METRICS_CLEANED, sep='\t', index=False)
 
 
-    plot_feature_distributions(
-            df,
-            config.MODEL_FEATURES,
-            assay_col="assay_type",
-            out_dir=os.path.join(
-                config.PREPROCESSING_PLOT_DIR,
-                "feature_distribution"
-            )
-        )
+    #plot_feature_distributions(
+            #df,
+            #config.MODEL_FEATURES,
+            #assay_col="assay_type",
+            #out_dir=os.path.join(
+                #config.PREPROCESSING_PLOT_DIR,
+                #"feature_distribution"
+            #)
+        #)
 
     # Filter to the requested production assay
     df = separate_data(
@@ -1004,7 +1007,7 @@ def run_preprocessing(file_path: str, assay: str, version: str, out_dir: None):
     logging.info(f"Correlation matrix post processing saved for assay: {assay}")
 
     if out_dir is not None:
-        save_transformers(ohe, imputer, scaler, vt, to_drop, out_dir)
+        save_transformers(ohe, imputer, scaler, vt, to_drop, assay, version, out_dir)
 
     logging.info(f"Preprocessing complete. X_train: {X_train.shape} | X_test: {X_test.shape}")
     return X_train, X_test, train_meta, test_meta

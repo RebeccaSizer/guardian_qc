@@ -40,16 +40,19 @@ SAMPLE_SHEET_PATTERN = re.compile(r"^SampleSheet\.csv$")
 QC_FILE_PATHS = "data/raw/qc_summary_file_paths.csv"
 
 # Set output file location for files that pass run-level QC filtering and have all information for downstream analysis
-FILTERED_RUN_QC_DATA = "data/processed/filtered_by_run_metrics(1).tsv"
+FILTERED_RUN_QC_DATA = "data/preprocessed/filtered_by_run_metrics(1).tsv"
 
 # Set file path to summary_qc_metrics.csv file
-SUMMARY_QC_METRICS = "data/processed/summary_qc_metrics(2).tsv"
+SUMMARY_QC_METRICS = "data/preprocessed/summary_qc_metrics(2).tsv"
 
+# Path to plots 
+INGEST_PLOT_DIR = "outputs/graphs/ingest"
 #########################################
 # Set up variables for preprocessing.py
 #########################################
 
-SUMMARY_QC_METRICS_CLEANED = "data/processed/cleaned_summary_qc_metrics(3).tsv"
+
+SUMMARY_QC_METRICS_CLEANED = "data/preprocessed/cleaned_summary_qc_metrics(3).tsv"
 
 # Set variables for preprocessing 
 # Define the model features 
@@ -91,11 +94,18 @@ PREPROCESSING_OUTDIR = 'models/preprocessing/'
 #UNSUPERVISED_MODELS_DIR = 'models/unsupervised/'
 PREPROCESSING_PLOT_DIR = 'outputs/graphs/preprocessing/'
 
+
 #################################
 # set up variables for train_n.py
 #################################
+
 N_ESTIMATORS = 100 # The number of base estimators in the ensemble (Number of decision trees) - can up to 300 if needed
 RANDOM_STATE = 42 # Controls the pseudo-randomness of the selection of the features and the split values - needed to build a reproducible random sequence
  
 # Top features to report
 TOP_N_FEATURES = 3
+
+# Output directory for models 
+TRAINED_COMPOSITE_MODEL_OUTDIR = 'models/trained/composite'
+TRAINING_PLOT_DIR = 'outputs/graphs/train'
+TRAINED_OUTPUT_DATA = 'data/trained'

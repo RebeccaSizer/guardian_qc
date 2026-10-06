@@ -52,6 +52,11 @@ run_model_pipeline()
 Date: 2026-08-19
 Author: Rebecca Sizer
 """
+
+####################
+# install packages
+#####################
+
 import os
 import logging
 import numpy as np
@@ -63,8 +68,23 @@ from outputs.graphs.train.train_graphs import plot_score_distribution, plot_flag
 from utils.logger import logging
 import config
 import argparse
+from sklearn.metrics import (
+    precision_recall_curve,
+    average_precision_score,
+    PrecisionRecallDisplay,
+)
+import seaborn as sns
+import matplotlib.pyplot as plt
+import matplotlib.ticker as mtick
+import shap 
+from pathlib import Path
 
- 
+
+
+
+#####################
+# Train model 
+####################
 # Unsupervised model training
 # Isolation forest
 def fit_isolation_forest(X_train: pd.DataFrame, assay: str, version: str, contamination: float):
@@ -259,8 +279,6 @@ def explain_all_outliers(
     return all_explanations
  
  
-# ── 7. Summary logging ────────────────────────────────────────────────────────
- 
 def log_model_summary(
     assay: str,
     version: str,
@@ -299,11 +317,159 @@ def attach_metadata(X_scored: pd.DataFrame, meta: pd.DataFrame) -> pd.DataFrame:
     merged = meta.join(X_scored, how="inner")
     return merged
 
+def explain_outliers_shap(X_scored: pd.DataFrame,
+    model, features, out_dir
+    ) -> pd.DataFrame:
+
+    explainer = shap.TreeExplainer(model)
+    shap_values = explainer(X_scored).values
+
+    print(shap_values.shape)
+    print(X_scored.shape)
+
+    shap.plot.waterfall(shap_values[0])
+    shap.plot.waterfall(shap_values[2])
+    shap.plots.bar(shap_values)
+    shap.plots.beeswarm(shap_values)
+
+############################
+# Graphs
+############################
+
+def plot_score_distribution(
+    X_train_scored: pd.DataFrame,
+    X_test_scored: pd.DataFrame,
+    assay: str,
+    out_dir: str,
+) -> None:
+    """
+    Plot the distribution of anomaly scores for train and test sets.
+    The vertical dashed line at x=0 is the decision boundary — left = flagged.
+    """
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5), sharey=False)
+    fig.suptitle(f"Anomaly score distribution — {assay}", fontsize=13)
+ 
+    for ax, scored, label in zip(
+        axes,
+        [X_train_scored, X_test_scored],
+        ["Training set", "Test set"],
+    ):
+        colours = scored["anomaly_label"].map({1: "#4C72B0", -1: "#DD4949"})
+        ax.scatter(
+            scored["anomaly_score"],
+            np.zeros(len(scored)) + np.random.uniform(-0.1, 0.1, len(scored)),
+            c=colours,
+            alpha=0.5,
+            s=15,
+            edgecolors="none",
+        )
+        sns.kdeplot(
+            data=scored, x="anomaly_score",
+            ax=ax, color="black", linewidth=1.5,
+        )
+        ax.axvline(0, linestyle="--", color="red", linewidth=1, label="Decision boundary")
+        ax.set_xlabel("Anomaly score (lower = more anomalous)")
+        ax.set_ylabel("")
+        ax.set_yticks([])
+        ax.set_title(label)
+        ax.legend(fontsize=9)
+ 
+        n_flagged = (scored["anomaly_label"] == -1).sum()
+        ax.text(
+            0.02, 0.95,
+            f"Flagged: {n_flagged} / {len(scored)} ({100*n_flagged/len(scored):.1f}%)",
+            transform=ax.transAxes, fontsize=9,
+            verticalalignment="top", color="#DD4949",
+        )
+ 
+    plt.tight_layout()
+    os.makedirs(out_dir, exist_ok=True)
+    out_path = os.path.join(out_dir, f"{assay}_score_distribution.png")
+    plt.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close()
+    logging.info(f"[{assay}] Score distribution plot saved to {out_path}")
+ 
+ 
+def plot_top_deviant_features(
+    explanations: pd.DataFrame,
+    assay: str,
+    out_dir: str,
+    top_n: int = 10,
+) -> None:
+    """
+    Bar chart showing which features most frequently appear in the top
+    deviant features across all flagged samples for an assay.
+    Helps identify which QC metrics are driving the most flags.
+    """
+    if explanations.empty:
+        return
+ 
+    feature_counts = (
+        explanations.groupby("feature")["robust_z_score"]
+        .mean()
+        .sort_values(ascending=False)
+        .head(top_n)
+    )
+ 
+    fig, ax = plt.subplots(figsize=(10, 5))
+    feature_counts.plot(kind="barh", ax=ax, color="#4C72B0", edgecolor="white")
+    ax.set_xlabel("Mean robust z-score across flagged samples")
+    ax.set_ylabel("Feature")
+    ax.set_title(f"Top deviant features in flagged samples — {assay}")
+    ax.invert_yaxis()
+    plt.tight_layout()
+ 
+    os.makedirs(out_dir, exist_ok=True)
+    out_path = os.path.join(out_dir, f"{assay}_top_deviant_features.png")
+    plt.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close()
+    logging.info(f"[{assay}] Top deviant features plot saved to {out_path}")
+
+def plot_anomaly_score(X_scored, assay, version):
+
+    plt.figure(figsize=(10, 5))
+
+    X_scored_copy = X_scored.reset_index(drop=True)
+    X_scored_copy["instance"] = X_scored_copy.index
+
+    normal = X_scored_copy[X_scored_copy["anomaly_label"] == 1]
+    anomalies = X_scored_copy[X_scored_copy["anomaly_label"] == -1]
+
+    plt.scatter(
+        normal["instance"],
+        normal["anomaly_score"],
+        label="Normal",
+        s=10
+    )
+
+    plt.scatter(
+        anomalies["instance"],
+        anomalies["anomaly_score"],
+        label="Outlier",
+        s=10
+    )
+
+    plt.title(f"Anomaly scores: {assay}_{version}")
+    plt.xlabel("Instance")
+    plt.ylabel("Anomaly score")
+    plt.legend()
+
+    output_path = (
+        Path(config.TRAINING_PLOT_DIR)
+        / f"anomaly_score_scatter_{assay}_{version}.png"
+    )
+
+    plt.savefig(output_path, bbox_inches="tight")
+    plt.close()
+
+########################
+# Run all
+#########################
  
 def run_model_train(X_train, X_test, train_meta, test_meta, assay, version, split, contamination, out_dir):
 
     model = fit_isolation_forest(X_train, assay, version, contamination)
-    save_model(model, assay, version, os.path.join('models/trained/composite', args.assay))
+    save_model(model, assay, version, os.path.join(config.TRAINED_COMPOSITE_MODEL_OUTDIR, args.assay))
 
     X_train_scored = score_samples(model, X_train, assay, version, 'train')
     X_test_scored = score_samples(model, X_test, assay, version, 'test')
@@ -313,15 +479,11 @@ def run_model_train(X_train, X_test, train_meta, test_meta, assay, version, spli
     test_results  = attach_metadata(X_test_scored,  test_meta)
 
     # Plot distribution
-    plot_score_distribution(X_train_scored, X_test_scored, assay, os.path.join('outputs/graphs/train', args.assay, args.version))
-    
+    plot_score_distribution(X_train_scored, X_test_scored, assay, os.path.join(config.TRAINING_PLOT_DIR, args.assay, args.version))
+    plot_anomaly_score(test_results, assay, version)
 
     X_train_scored_explained = explain_all_outliers(train_results, X_train, assay, version, out_dir, 'train', config.TOP_N_FEATURES)
     X_test_scored_explained = explain_all_outliers(test_results, X_train, assay, version, out_dir, 'test', config.TOP_N_FEATURES)
-
-    print(X_test_scored_explained)
-
-    print(X_test_scored_explained)
 
     # For model summary 
     n_train = len(X_train)
