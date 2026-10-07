@@ -257,13 +257,13 @@ def explain_all_outliers(
         explanation_rows.append(explanation)
  
         top_feature = explanation.iloc[0]
-        logging.info(
-            f"  Sample {idx} | score={row['anomaly_score']:.4f} | "
-            f"top deviant feature: {top_feature['feature']} "
-            f"(z={top_feature['robust_z_score']:.2f}, "
-            f"value={top_feature['sample_value']:.3f}, "
-            f"median={top_feature['train_median']:.3f})"
-        )
+        #logging.info(
+            #f"  Sample {idx} | score={row['anomaly_score']:.4f} | "
+            #f"top deviant feature: {top_feature['feature']} "
+            #f"(z={top_feature['robust_z_score']:.2f}, "
+            #f"value={top_feature['sample_value']:.3f}, "
+            #f"median={top_feature['train_median']:.3f})"
+        #)
  
     if not explanation_rows:
         logging.info(f"[{assay}_{version}] No flagged samples to explain.")
@@ -318,26 +318,93 @@ def attach_metadata(X_scored: pd.DataFrame, meta: pd.DataFrame) -> pd.DataFrame:
     return merged
 
 def explain_outliers_shap(X_scored: pd.DataFrame,
-    model, features, assay, version, out_dir
+    model, features, assay, version, out_dir, top_n
     ) -> pd.DataFrame:
     
     os.makedirs(out_dir, exist_ok=True)
     
     explainer = shap.TreeExplainer(model)
 
-    outliers = (X_scored["anomaly_label"] == -1).to_numpy()
-    normal = (X_scored["anomaly_label"] == 1).to_numpy()
+    outlier_mask = (X_scored["anomaly_label"] == -1).to_numpy()
+    X_outliers = X_scored.loc[outlier_mask, features].copy()
 
-    X_explain_global = X_scored[features]
-    shap_values = explainer(X_explain_global)
-    print(shap_values)
+    shap_values = explainer(X_outliers)
+    print("Number of features:", len(features))
+    print("SHAP shape:", shap_values.values.shape)
+    print("Feature names:", features)
 
+    def get_top_shap_values(features, top_n=3):
 
+        shap_array = shap_values.values
+        results = []
+        
+        for i in range(shap_array.shape[0]):
 
+            sample_shap = shap_array[i] # list of metrics for that sample
+            top_indices = np.argsort( # return the sorted values indexes
+                np.abs(sample_shap)
+            )[::-1][:top_n] #reverse the order bc i want largest magnitude, and filter for top 3 only 
 
+            sample_result = {}
 
+            for rank, feature_idx in enumerate(top_indices, start=1):
 
-    return shap_values
+                feature = features[int(feature_idx)]
+                shap_value = float(sample_shap[int(feature_idx)])
+
+                sample_result[f"top_{rank}_metric"] = feature
+                sample_result[f"top_{rank}_shap"] = shap_value
+                sample_result[f"top_{rank}_abs_shap"] = abs(shap_value)
+
+            results.append(sample_result)
+
+        return pd.DataFrame(results)
+
+    top_shap = get_top_shap_values(features, top_n)
+    print(top_shap.head())
+    print(top_shap.dtypes)
+    print(top_shap.shape)
+
+    shap_columns = top_shap.columns
+
+    metric_columns = [
+    col for col in top_shap.columns
+    if col.endswith("_metric")
+    ]
+
+    numeric_columns = [
+        col for col in top_shap.columns
+        if col.endswith("_shap") or col.endswith("_abs_shap")
+    ]
+
+    # Create metric columns as object dtype
+    for col in metric_columns:
+        X_scored[col] = pd.Series(
+            pd.NA,
+            index=X_scored.index,
+            dtype="object"
+        )
+
+    # Create numeric SHAP columns
+    for col in numeric_columns:
+        X_scored[col] = np.nan
+
+    # Add metric names for the outlier rows
+    X_scored.loc[
+        outlier_mask,
+        metric_columns
+    ] = top_shap[metric_columns].to_numpy()
+
+    # Add SHAP values for the outlier rows
+    X_scored.loc[
+        outlier_mask,
+        numeric_columns
+    ] = top_shap[numeric_columns].to_numpy()
+
+    print(X_scored)
+
+    return X_scored
+
 
 ############################
 # Graphs
@@ -611,7 +678,7 @@ def run_model_train(X_train, X_test, train_meta, test_meta, assay, version, spli
     plot_score_distribution(X_train_scored, X_test_scored, assay, os.path.join(config.TRAINING_PLOT_DIR, args.assay, args.version))
     plot_anomaly_score(test_results, assay, version)
     
-    explain_outliers_shap(test_results, model, features, assay, version, config.TRAINING_PLOT_DIR)
+    explain_outliers_shap(test_results, model, features, assay, version, config.TRAINING_PLOT_DIR, 3)
     plot_shap(test_results, model, features, assay, version, config.TRAINING_PLOT_DIR)
 
     X_train_scored_explained = explain_all_outliers(train_results, X_train, assay, version, out_dir, 'train', config.TOP_N_FEATURES)
