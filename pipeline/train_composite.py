@@ -80,8 +80,6 @@ import shap
 from pathlib import Path
 
 
-
-
 #####################
 # Train model 
 ####################
@@ -332,57 +330,12 @@ def explain_outliers_shap(X_scored: pd.DataFrame,
 
     X_explain_global = X_scored[features]
     shap_values = explainer(X_explain_global)
+    print(shap_values)
 
-    shap_outliers = shap_values[outliers]
-    shap_normal = shap_values[normal]   
 
-    shap.plots.waterfall(shap_outliers[1])
-    plt.savefig(
-        os.path.join(out_dir, assay, version, "shap_waterfall_sample_outlier.png"),
-        bbox_inches="tight",
-        dpi=300
-    )
-    plt.close()
-    shap.plots.waterfall(shap_normal[1])
-    plt.savefig(
-        os.path.join(out_dir, assay, version, "shap_waterfall_sample_normal.png"),
-        bbox_inches="tight",
-        dpi=300
-    )
-    plt.close()
-    # Outliers
-    shap.plots.bar(shap_outliers, show=False)
-    plt.savefig(
-        os.path.join(out_dir, assay, version, "shap_bar_outliers.png"),
-        bbox_inches="tight",
-        dpi=300
-    )
-    plt.close()
 
-    # Normal
-    shap.plots.bar(shap_normal, show=False)
-    plt.savefig(
-        os.path.join(out_dir, assay, version, "shap_bar_normal.png"),
-        bbox_inches="tight",
-        dpi=300
-    )
-    plt.close()
-  
-    shap.plots.beeswarm(shap_outliers, show=False)
-    plt.savefig(
-        os.path.join(out_dir, assay, version, "shap_beeswarm_outliers.png"),
-        bbox_inches="tight",
-        dpi=300
-    )
-    plt.close()
 
-    shap.plots.beeswarm(shap_normal, show=False)
-    plt.savefig(
-        os.path.join(out_dir, assay, version, "shap_beeswarm_normal.png"),
-        bbox_inches="tight",
-        dpi=300
-    )
-    plt.close()
+
 
     return shap_values
 
@@ -521,6 +474,107 @@ def plot_anomaly_score(X_scored, assay, version):
     plt.savefig(output_path, bbox_inches="tight")
     plt.close()
 
+def plot_shap(X_scored, model, features, assay, version, out_dir):
+
+    explainer = shap.TreeExplainer(model)
+    X_explain_global = X_scored[features]
+    shap_values = explainer(X_explain_global)
+
+    # Isolate Outliers and Norms
+    outliers = (X_scored["anomaly_label"] == -1).to_numpy()
+    normal = (X_scored["anomaly_label"] == 1).to_numpy()
+
+    # calculate shap values
+    shap_outliers = shap_values[outliers]
+    shap_normal = shap_values[normal]   
+
+    # Work out the path length for comparison
+    path_length = shap_values.base_values + shap_values.values.sum(axis=1)
+
+    path_length_anomalies = path_length[outliers]
+    path_length_normal = path_length[normal]
+
+    # Check for interactions. 
+    shap_interaction_values = explainer.shap_interaction_values(X_explain_global)
+    
+    # Interaction values
+    mean_shap = np.abs(shap_interaction_values).mean(0)
+    mean_shap = np.round(mean_shap, 1)
+    df = pd.DataFrame(mean_shap, index=X_explain_global.columns, columns=X_explain_global.columns)
+    df.where(df.values == np.diagonal(df), df.values * 2, inplace = True)
+
+    # plots a heatmap of the average shap interaction values
+    sns.set(font_scale=1)
+    sns.heatmap(df, cmap="coolwarm", annot=True)
+    plt.yticks(rotation=0)
+    plt.savefig(
+            os.path.join(out_dir, assay, version, "shap_interactions.png"),
+            bbox_inches="tight",
+            dpi=300
+        )
+    plt.close()
+
+    # Plot graphs
+    shap.plots.waterfall(shap_outliers[1]) # f(x) = average path length across all branches
+    plt.savefig(
+        os.path.join(out_dir, assay, version, "shap_waterfall_sample_outlier.png"),
+        bbox_inches="tight",
+        dpi=300
+    )
+    plt.close()
+    shap.plots.waterfall(shap_normal[1])
+    plt.savefig(
+        os.path.join(out_dir, assay, version, "shap_waterfall_sample_normal.png"),
+        bbox_inches="tight",
+        dpi=300
+    )
+    plt.close()
+    # Outliers
+    shap.plots.bar(shap_outliers, show=False)
+    plt.savefig(
+        os.path.join(out_dir, assay, version, "shap_bar_outliers.png"),
+        bbox_inches="tight",
+        dpi=300
+    )
+    plt.close()
+
+    # Normal
+    shap.plots.bar(shap_normal, show=False)
+    plt.savefig(
+        os.path.join(out_dir, assay, version, "shap_bar_normal.png"),
+        bbox_inches="tight",
+        dpi=300
+    )
+    plt.close()
+  
+    shap.plots.beeswarm(shap_outliers, show=False)
+    plt.savefig(
+        os.path.join(out_dir, assay, version, "shap_beeswarm_outliers.png"),
+        bbox_inches="tight",
+        dpi=300
+    )
+    plt.close()
+
+    shap.plots.beeswarm(shap_normal, show=False)
+    plt.savefig(
+        os.path.join(out_dir, assay, version, "shap_beeswarm_normal.png"),
+        bbox_inches="tight",
+        dpi=300
+    )
+    plt.close()
+
+    plt.figure(figsize=(10, 5))
+    plt.boxplot([path_length_anomalies, path_length_normal], tick_labels=['Outlier', 'Normal'])
+    plt.ylabel('Average Path Length f(x)')
+    plt.savefig(
+            os.path.join(out_dir, assay, version, "average_path_length_comparison.png"),
+            bbox_inches="tight",
+            dpi=300
+        )
+    plt.close()
+    
+    
+
 ########################
 # Run all
 #########################
@@ -556,8 +610,9 @@ def run_model_train(X_train, X_test, train_meta, test_meta, assay, version, spli
     # Plot distribution
     plot_score_distribution(X_train_scored, X_test_scored, assay, os.path.join(config.TRAINING_PLOT_DIR, args.assay, args.version))
     plot_anomaly_score(test_results, assay, version)
+    
     explain_outliers_shap(test_results, model, features, assay, version, config.TRAINING_PLOT_DIR)
-
+    plot_shap(test_results, model, features, assay, version, config.TRAINING_PLOT_DIR)
 
     X_train_scored_explained = explain_all_outliers(train_results, X_train, assay, version, out_dir, 'train', config.TOP_N_FEATURES)
     X_test_scored_explained = explain_all_outliers(test_results, X_train, assay, version, out_dir, 'test', config.TOP_N_FEATURES)
