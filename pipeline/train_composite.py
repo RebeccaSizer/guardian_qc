@@ -318,7 +318,7 @@ def attach_metadata(X_scored: pd.DataFrame, meta: pd.DataFrame) -> pd.DataFrame:
     return merged
 
 def explain_outliers_shap(X_scored: pd.DataFrame,
-    model, features, assay, version, out_dir, top_n
+    model, features, out_dir, top_n
     ) -> pd.DataFrame:
     
     os.makedirs(out_dir, exist_ok=True)
