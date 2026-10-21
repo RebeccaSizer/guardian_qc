@@ -12,58 +12,7 @@ import numpy as np
 from utils.logger import logging
 
 
-def plot_score_distribution(
-    X_train_scored: pd.DataFrame,
-    X_test_scored: pd.DataFrame,
-    assay: str,
-    out_dir: str,
-) -> None:
-    """
-    Plot the distribution of anomaly scores for train and test sets.
-    The vertical dashed line at x=0 is the decision boundary — left = flagged.
-    """
-    fig, axes = plt.subplots(1, 2, figsize=(14, 5), sharey=False)
-    fig.suptitle(f"Anomaly score distribution — {assay}", fontsize=13)
- 
-    for ax, scored, label in zip(
-        axes,
-        [X_train_scored, X_test_scored],
-        ["Training set", "Test set"],
-    ):
-        colours = scored["anomaly_label"].map({1: "#4C72B0", -1: "#DD4949"})
-        ax.scatter(
-            scored["anomaly_score"],
-            np.zeros(len(scored)) + np.random.uniform(-0.1, 0.1, len(scored)),
-            c=colours,
-            alpha=0.5,
-            s=15,
-            edgecolors="none",
-        )
-        sns.kdeplot(
-            data=scored, x="anomaly_score",
-            ax=ax, color="black", linewidth=1.5,
-        )
-        ax.axvline(0, linestyle="--", color="red", linewidth=1, label="Decision boundary")
-        ax.set_xlabel("Anomaly score (lower = more anomalous)")
-        ax.set_ylabel("")
-        ax.set_yticks([])
-        ax.set_title(label)
-        ax.legend(fontsize=9)
- 
-        n_flagged = (scored["anomaly_label"] == -1).sum()
-        ax.text(
-            0.02, 0.95,
-            f"Flagged: {n_flagged} / {len(scored)} ({100*n_flagged/len(scored):.1f}%)",
-            transform=ax.transAxes, fontsize=9,
-            verticalalignment="top", color="#DD4949",
-        )
- 
-    plt.tight_layout()
-    os.makedirs(out_dir, exist_ok=True)
-    out_path = os.path.join(out_dir, f"{assay}_score_distribution.png")
-    plt.savefig(out_path, dpi=150, bbox_inches="tight")
-    plt.close()
-    logging.info(f"[{assay}] Score distribution plot saved to {out_path}")
+
  
  
 def plot_flagging_rates(

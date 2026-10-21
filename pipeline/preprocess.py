@@ -267,9 +267,10 @@ def remove_duplicates(data_frame):
         dataframe: with duplicate rows removed 
     """
     try:
+
         logging.info(f"Removing any duplicate rows...") # Should I remove duplicate sample names - will this bias the model
         original_len = len(data_frame)
-        deduplicated_df = data_frame.drop_duplicates()
+        deduplicated_df = data_frame.drop_duplicates(subset=["sample_name"])
         final_len = len(deduplicated_df)
         logging.info(f"Total rows removed due to duplication: {original_len - final_len}")
 
@@ -1009,7 +1010,8 @@ def run_preprocessing(file_path: str, assay: str, version: str, out_dir: None):
     if out_dir is not None:
         save_transformers(ohe, imputer, scaler, vt, to_drop, assay, version, out_dir)
 
-    logging.info(f"Preprocessing complete. X_train: {X_train.shape} | X_test: {X_test.shape}")
+    logging.info(f"Preprocessing complete. train_meta: {train_meta.shape} | X_train: {X_train.shape}")
+    logging.info(f"Preprocessing complete. test_meta: {test_meta.shape} | X_test: {X_test.shape}")
     return X_train, X_test, train_meta, test_meta
 
 if __name__ == "__main__":

@@ -228,57 +228,65 @@ def explain_outlier(
     #print(f"explain outlier result: {result}")
     return result
 
+
+
 def explain_all_outliers(
-        X_scored: pd.DataFrame,
-        X_train: pd.DataFrame,
-        assay: str,
-        version: str,
-        out_dir: str,
-        split: str,
-        top_n: int = config.TOP_N_FEATURES,
-    ) -> pd.DataFrame:
+    X_scored: pd.DataFrame,
+    X_train: pd.DataFrame,
+    assay: str,
+    version: str,
+    out_dir: str,
+    top_n: int = config.TOP_N_FEATURES,
+) -> pd.DataFrame:
     """
-    Apply explain_outlier to every flagged sample in a scored DataFrame.
-    Saves a summary CSV and logs the top deviant feature per flagged sample.
- 
-    Returns a long-format DataFrame with one row per (sample, feature).
+    Explain every flagged sample.
+
+    Returns one row per anomalous record, with each top deviant
+    feature stored in separate columns.
     """
     os.makedirs(out_dir, exist_ok=True)
 
-    flagged = X_scored[X_scored["anomaly_label"] == -1]
-    logging.info(f"[{assay}_{version}] Explaining {len(flagged)} flagged samples...")
- 
+    anomalies = X_scored[X_scored["anomaly_label"] == -1]
+
+    logging.info(
+        f"[{assay}_{version}] Explaining {len(anomalies)} flagged records..."
+    )
+
     explanation_rows = []
- 
-    for idx, row in flagged.iterrows():
+
+    for idx, row in anomalies.iterrows():
         explanation = explain_outlier(row, X_train, top_n=top_n)
-        explanation.insert(0, "sample_name", row["sample_name"])
-        explanation.insert(1, "anomaly_score", row["anomaly_score"])
-        explanation_rows.append(explanation)
- 
-        top_feature = explanation.iloc[0]
-        #logging.info(
-            #f"  Sample {idx} | score={row['anomaly_score']:.4f} | "
-            #f"top deviant feature: {top_feature['feature']} "
-            #f"(z={top_feature['robust_z_score']:.2f}, "
-            #f"value={top_feature['sample_value']:.3f}, "
-            #f"median={top_feature['train_median']:.3f})"
-        #)
- 
+
+        sample_explanation = {
+            "sample_index": idx,
+            "sample_name": row["sample_name"],
+            "anomaly_score": row["anomaly_score"],
+        }
+
+        for rank, (_, feature_row) in enumerate(
+            explanation.iterrows(), start=1
+        ):
+            sample_explanation[f"top_{rank}_feature"] = feature_row["feature"]
+            sample_explanation[f"top_{rank}_sample_value"] = (
+                feature_row["sample_value"]
+            )
+            sample_explanation[f"top_{rank}_train_median"] = (
+                feature_row["train_median"]
+            )
+            sample_explanation[f"top_{rank}_mad"] = feature_row["mad"]
+            sample_explanation[f"top_{rank}_robust_z_score"] = (
+                feature_row["robust_z_score"]
+            )
+
+        explanation_rows.append(sample_explanation)
+
     if not explanation_rows:
         logging.info(f"[{assay}_{version}] No flagged samples to explain.")
         return pd.DataFrame()
- 
-    all_explanations = pd.concat(explanation_rows, ignore_index=True)
- 
-    #os.makedirs(out_dir, exist_ok=True)
-    #out_path = os.path.join(out_dir, f"{assay}_{version}_{split}_outlier_explanations.csv")
-    #all_explanations.to_csv(out_path, index=False)
-    logging.info(f"[{assay}_{version}] Explanations saved to {out_dir}")
- 
-    return all_explanations
- 
- 
+
+    return pd.DataFrame(explanation_rows)
+
+
 def log_model_summary(
     assay: str,
     version: str,
@@ -485,7 +493,7 @@ def plot_top_deviant_features(
 
     # Count how often each feature appears in the explanations.
     feature_counts = (
-        explanations["feature"]
+        explanations["top_1_feature"]
         .value_counts()
         .head(top_n)
         .sort_values(ascending=True)
@@ -670,9 +678,15 @@ def run_model_train(X_train, X_test, train_meta, test_meta, assay, version, spli
     X_train_scored = score_samples(model, X_train, assay, version, 'train')
     X_test_scored = score_samples(model, X_test, assay, version, 'test')
 
+    print("Duplicates in train_results in X_test_scored:")
+    print(X_test_scored.shape)
+
     # Attach metadata so you can identify samples by name
     train_results = attach_metadata(X_train_scored, train_meta)
     test_results  = attach_metadata(X_test_scored,  test_meta)
+
+    print("Duplicates in train_results in X_test_scored:")
+    print(train_results.shape)
 
     if assay == 'haem':
         features = ['bcftools_tv', 'bcftools_tstv', 'bcftools_snvs', 'bcftools_indels', 
@@ -694,10 +708,13 @@ def run_model_train(X_train, X_test, train_meta, test_meta, assay, version, spli
     plot_anomaly_score(test_results, assay, version)
     
     explain_outliers_shap(test_results, model, features, config.TRAINING_PLOT_DIR, 3)
+    explain_outliers_shap(train_results, model, features, config.TRAINING_PLOT_DIR, 3)
+    
     plot_shap(test_results, model, features, assay, version, config.TRAINING_PLOT_DIR)
 
-    X_train_scored_explained = explain_all_outliers(train_results, X_train, assay, version, out_dir, 'train', config.TOP_N_FEATURES)
-    X_test_scored_explained = explain_all_outliers(test_results, X_train, assay, version, out_dir, 'test', config.TOP_N_FEATURES)
+    X_train_scored_explained = explain_all_outliers(train_results, X_train, assay, version, out_dir, config.TOP_N_FEATURES)
+    X_test_scored_explained = explain_all_outliers(test_results, X_train, assay, version, out_dir, config.TOP_N_FEATURES)
+
 
     plot_top_deviant_features(X_test_scored_explained, assay, os.path.join(config.TRAINING_PLOT_DIR, args.assay, args.version), 10)
     
@@ -718,17 +735,38 @@ def run_model_train(X_train, X_test, train_meta, test_meta, assay, version, spli
         )
 
     #merge explanations with the scored daraframe
-    model_output_train = train_results.merge(X_train_scored_explained[['sample_name', 'feature', 'sample_value', 'train_median', 'mad', 'robust_z_score']], 
-                                             on='sample_name', how='left')
+    model_output_train = (
+        train_results
+        .assign(sample_index=train_results.index)
+        .merge(
+            X_train_scored_explained.drop(columns=["sample_name", "anomaly_score"]),
+            on="sample_index",
+            how="left",
+            validate="one_to_one",
+        )
+        .drop(columns=["sample_index"])
+    )
 
-    model_output_test = test_results.merge(X_test_scored_explained[['sample_name', 'feature', 'sample_value', 'train_median', 'mad', 'robust_z_score']], 
-                                                 on='sample_name', how='left')
+    model_output_test = (
+        test_results
+        .assign(sample_index=test_results.index)
+        .merge(
+            X_test_scored_explained.drop(columns=["sample_name", "anomaly_score"]),
+            on="sample_index",
+            how="left",
+            validate="one_to_one",
+        )
+        .drop(columns=["sample_index"])
+    )
 
     # Save the full scored + metadata output for manual review
     os.makedirs(out_dir, exist_ok=True)
     model_output_train.to_csv(os.path.join(out_dir, f"{assay}_{version}_train_scored.csv"), index=True)
     model_output_test.to_csv( os.path.join(out_dir, f"{assay}_{version}_test_scored.csv"),  index=True)
     logging.info(f"[{assay}] Scored outputs with metadata saved to {out_dir}")
+
+    logging.info(f"Training complete. model_output_train: {model_output_train.shape}")
+    logging.info(f"Training complete. model_output_test: {model_output_test.shape}")
 
     return model_output_train, model_output_test
  
