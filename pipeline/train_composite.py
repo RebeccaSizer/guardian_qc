@@ -473,35 +473,50 @@ def plot_top_deviant_features(
     top_n: int = 10,
 ) -> None:
     """
-    Bar chart showing which features most frequently appear in the top
-    deviant features across all flagged samples for an assay.
-    Helps identify which QC metrics are driving the most flags.
+    Bar chart showing which features appear most frequently among
+    the deviant features across all flagged samples for an assay.
+    Helps identify which QC metrics are most frequently associated
+    with flags.
     """
     os.makedirs(out_dir, exist_ok=True)
 
     if explanations.empty:
         return
- 
+
+    # Count how often each feature appears in the explanations.
     feature_counts = (
-        explanations.groupby("feature")["robust_z_score"]
-        .mean()
-        .sort_values(ascending=False)
+        explanations["feature"]
+        .value_counts()
         .head(top_n)
+        .sort_values(ascending=True)
     )
- 
+
     fig, ax = plt.subplots(figsize=(10, 5))
-    feature_counts.plot(kind="barh", ax=ax, color="#4C72B0", edgecolor="white")
-    ax.set_xlabel("Mean robust z-score across flagged samples")
+
+    feature_counts.plot(
+        kind="barh",
+        ax=ax,
+        color="#4C72B0",
+        edgecolor="white",
+    )
+
+    ax.set_xlabel("Number of occurrences")
     ax.set_ylabel("Feature")
-    ax.set_title(f"Top deviant features in flagged samples — {assay}")
-    ax.invert_yaxis()
+    ax.set_title(f"Most frequently deviant features — {assay}")
+
     plt.tight_layout()
- 
-    os.makedirs(out_dir, exist_ok=True)
-    out_path = os.path.join(out_dir, f"{assay}_top_deviant_features.png")
+
+    out_path = os.path.join(
+        out_dir, f"{assay}_top_deviant_features.png"
+    )
+
     plt.savefig(out_path, dpi=150, bbox_inches="tight")
     plt.close()
-    logging.info(f"[{assay}] Top deviant features plot saved to {out_path}")
+
+    logging.info(
+        f"[{assay}] Top deviant features plot saved to {out_path}"
+    )
+    
 
 def plot_anomaly_score(X_scored, assay, version):
 
@@ -678,12 +693,14 @@ def run_model_train(X_train, X_test, train_meta, test_meta, assay, version, spli
     plot_score_distribution(X_train_scored, X_test_scored, assay, os.path.join(config.TRAINING_PLOT_DIR, args.assay, args.version))
     plot_anomaly_score(test_results, assay, version)
     
-    explain_outliers_shap(test_results, model, features, assay, version, config.TRAINING_PLOT_DIR, 3)
+    explain_outliers_shap(test_results, model, features, config.TRAINING_PLOT_DIR, 3)
     plot_shap(test_results, model, features, assay, version, config.TRAINING_PLOT_DIR)
 
     X_train_scored_explained = explain_all_outliers(train_results, X_train, assay, version, out_dir, 'train', config.TOP_N_FEATURES)
     X_test_scored_explained = explain_all_outliers(test_results, X_train, assay, version, out_dir, 'test', config.TOP_N_FEATURES)
 
+    plot_top_deviant_features(X_test_scored_explained, assay, os.path.join(config.TRAINING_PLOT_DIR, args.assay, args.version), 10)
+    
     # For model summary 
     n_train = len(X_train)
     n_test = len(X_test)
