@@ -64,7 +64,7 @@ import pandas as pd
 import joblib
 from sklearn.ensemble import IsolationForest
 from pipeline.preprocess import run_preprocessing
-from outputs.graphs.train.train_graphs import plot_score_distribution, plot_flagging_rates, plot_top_deviant_features, evaluate_with_labels
+#from outputs.graphs.train.train_graphs import plot_score_distribution, plot_flagging_rates, plot_top_deviant_features, evaluate_with_labels
 from utils.logger import logging
 import config
 import argparse

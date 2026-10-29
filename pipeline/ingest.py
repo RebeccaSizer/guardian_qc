@@ -635,6 +635,7 @@ def sample_level_qc(df):
             return sample_qc
     
     summary_qc_metrics = []
+    sample_fail_count = 0
 
     try:
         for _, row in df.iterrows():
@@ -652,7 +653,15 @@ def sample_level_qc(df):
                     sample['assay_type'] = row['sequencer'] + '_' + row['cancer_type']
                     summary_qc_metrics.append(sample)
 
+            else:
+                summary_qc_file_path = row["qc_file_path"]
+                sample_qc = extract_values_from_qc_summary(summary_qc_file_path)
+
+                for sample in sample_qc:
+                    sample_fail_count +=1
+
         summary_qc_metrics_df = pd.DataFrame(summary_qc_metrics)
+        logging.info(f"Number of samples that failed to pass run level filters: {sample_fail_count}")
 
         return summary_qc_metrics_df
 
