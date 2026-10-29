@@ -132,7 +132,7 @@ def save_model(model: IsolationForest, assay: str, version: str, outdir: str) ->
 def load_model(assay: str, version: str, model_dir: str) -> IsolationForest:
     """ Load a fitted IsolationForest model"""
 
-    path = os.join.path(model_dir, f"{assay}_{version}_isolation_forest.pkl")
+    path = os.path.join(model_dir, f"{assay}_{version}_isolation_forest.pkl")
     model = joblib.load(path)
     logging.info(f"[{assay}_{version}] Model loaded from path {path}")
     return model
@@ -528,8 +528,6 @@ def plot_top_deviant_features(
 
 def plot_anomaly_score(X_scored, assay, version):
 
-    os.makedirs(out_dir, exist_ok=True)
-
     plt.figure(figsize=(10, 5))
 
     X_scored_copy = X_scored.reset_index(drop=True)
@@ -673,7 +671,7 @@ def run_model_train(X_train, X_test, train_meta, test_meta, assay, version, spli
     os.makedirs(out_dir, exist_ok=True)
 
     model = fit_isolation_forest(X_train, assay, version, contamination)
-    save_model(model, assay, version, os.path.join(config.TRAINED_COMPOSITE_MODEL_OUTDIR, args.assay))
+    save_model(model, assay, version, os.path.join(config.TRAINED_COMPOSITE_MODEL_OUTDIR, assay))
 
     X_train_scored = score_samples(model, X_train, assay, version, 'train')
     X_test_scored = score_samples(model, X_test, assay, version, 'test')
@@ -704,19 +702,19 @@ def run_model_train(X_train, X_test, train_meta, test_meta, assay, version, spli
                     'fastp_duplication_rate']
 
     # Plot distribution
-    plot_score_distribution(X_train_scored, X_test_scored, assay, os.path.join(config.TRAINING_PLOT_DIR, args.assay, args.version))
-    plot_anomaly_score(test_results, assay, version)
+    #plot_score_distribution(X_train_scored, X_test_scored, assay, os.path.join(config.TRAINING_PLOT_DIR, assay, version))
+    #plot_anomaly_score(test_results, assay, version)
     
     explain_outliers_shap(test_results, model, features, config.TRAINING_PLOT_DIR, 3)
     explain_outliers_shap(train_results, model, features, config.TRAINING_PLOT_DIR, 3)
     
-    plot_shap(test_results, model, features, assay, version, config.TRAINING_PLOT_DIR)
+    #plot_shap(test_results, model, features, assay, version, config.TRAINING_PLOT_DIR)
 
     X_train_scored_explained = explain_all_outliers(train_results, X_train, assay, version, out_dir, config.TOP_N_FEATURES)
     X_test_scored_explained = explain_all_outliers(test_results, X_train, assay, version, out_dir, config.TOP_N_FEATURES)
 
 
-    plot_top_deviant_features(X_test_scored_explained, assay, os.path.join(config.TRAINING_PLOT_DIR, args.assay, args.version), 10)
+    #plot_top_deviant_features(X_test_scored_explained, assay, os.path.join(config.TRAINING_PLOT_DIR, assay, version), 10)
     
     # For model summary 
     n_train = len(X_train)

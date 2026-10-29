@@ -1,6 +1,8 @@
 """Evaluate Guardian-QC Isolation Forest predictions and explanation methods."""
 
 from pathlib import Path
+import os 
+from utils.logger import logging
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -97,6 +99,257 @@ def evaluate_reason_method(row: pd.Series, columns: list[str]) -> dict:
         "reason_recall": len(matches) / len(true_features),
     }
 
+def get_truth_set(out_dir, assay):
+
+    file_path = os.path.join(out_dir, f"qc_fail_{assay}.tsv")
+
+    truth_set = []
+
+    with open(file_path, "r") as qc_fail:
+            for line in qc_fail:
+                line = line.strip()
+                truth_set.append(line)
+
+    return truth_set
+
+
+def quality_metric_flag_success_all(
+    scored: pd.DataFrame,
+    truth_set: pd.DataFrame,
+    assay: str,
+    version: str,
+    split: str,
+):
+    """
+    Evaluate Isolation Forest predictions against a labelled truth set.
+
+    Both DataFrames must contain:
+        sample_name: sample identifier
+        anomaly_label: -1 = anomaly, 1 = normal
+
+    Evaluation is performed at sample level, using only samples
+    present in both the scored dataset and the truth set.
+    """
+
+    scored = scored.copy()
+    truth_set = truth_set.copy()
+
+    required_columns = {"sample_name", "anomaly_label"}
+
+    for name, df in [("scored", scored), ("truth_set", truth_set)]:
+        missing = required_columns - set(df.columns)
+        if missing:
+            raise ValueError(
+                f"{name} is missing required columns: {sorted(missing)}"
+            )
+
+    # Keep only the sample ID and true label from the truth set.
+    truth = truth_set[["sample_name", "anomaly_label"]].rename(
+        columns={"anomaly_label": "true_label"}
+    )
+
+    # Aggregate model predictions to one prediction per sample.
+    # A sample is an anomaly if any of its rows was flagged.
+    predictions = (
+        scored.groupby("sample_name", as_index=False)
+        .agg(
+            predicted_label=(
+                "anomaly_label",
+                lambda x: -1 if (x == -1).any() else 1
+            )
+        )
+    )
+
+    # Require one unambiguous truth label per sample.
+    if truth["sample_name"].duplicated().any():
+        conflicting = truth.groupby("sample_name")["true_label"].nunique()
+        conflicting = conflicting[conflicting > 1].index.tolist()
+
+        if conflicting:
+            raise ValueError(
+                "Samples have conflicting truth labels: "
+                f"{conflicting[:10]}"
+            )
+
+        truth = truth.drop_duplicates(subset="sample_name")
+
+    invalid_labels = set(truth["true_label"].dropna().unique()) - {-1, 1}
+    if invalid_labels:
+        raise ValueError(
+            f"Truth labels must be -1 or 1. Found: {invalid_labels}"
+        )
+
+    # Inner join: evaluate only samples present in both datasets.
+    evaluated = predictions.merge(
+        truth,
+        on="sample_name",
+        how="inner",
+        validate="one_to_one",
+    )
+
+    # Remove missing truth labels, if any.
+    evaluated = evaluated.dropna(subset=["true_label"])
+
+    if evaluated.empty:
+        raise ValueError(
+            "No samples with known truth labels overlap with scored data."
+        )
+
+    # Confusion matrix counts at sample level.
+    true_anomaly = evaluated["true_label"] == -1
+    predicted_anomaly = evaluated["predicted_label"] == -1
+
+    tp = int((true_anomaly & predicted_anomaly).sum())
+    fn = int((true_anomaly & ~predicted_anomaly).sum())
+    fp = int((~true_anomaly & predicted_anomaly).sum())
+    tn = int((~true_anomaly & ~predicted_anomaly).sum())
+
+    precision = tp / (tp + fp) if (tp + fp) else 0
+    recall = tp / (tp + fn) if (tp + fn) else 0
+
+    denominator = precision + recall
+    f1_score = (
+        2 * precision * recall / denominator
+        if denominator else 0
+    )
+
+    total_scored = len(predictions)
+    total_truth = truth["sample_name"].nunique()
+    evaluated_samples = len(evaluated)
+    model_outlier_samples = int(predicted_anomaly.sum())
+    truth_anomaly_samples = int(true_anomaly.sum())
+
+    flag_rate = (
+        model_outlier_samples / evaluated_samples
+        if evaluated_samples else 0
+    )
+
+    logging.info(
+        f"\n{'=' * 50}\n"
+        f"Evaluation: {assay.upper()} | {version} | {split}\n"
+        f"{'=' * 50}\n"
+        f"Samples scored by model:       {total_scored}\n"
+        f"Samples in truth set:          {total_truth}\n"
+        f"Samples evaluated (overlap):   {evaluated_samples}\n"
+        f"True anomalies:                {truth_anomaly_samples}\n"
+        f"Model outliers in overlap:     {model_outlier_samples}\n"
+        f"True positives:                {tp}\n"
+        f"False positives:               {fp}\n"
+        f"False negatives:               {fn}\n"
+        f"True negatives:                {tn}\n"
+        f"Precision:                     {precision:.3f}\n"
+        f"Recall:                        {recall:.3f}\n"
+        f"F1-score:                      {f1_score:.3f}\n"
+        f"Flag rate (overlap):           {flag_rate:.1%}\n"
+        f"{'=' * 50}"
+    )
+
+    return {
+        "assay": assay,
+        "version": version,
+        "split": split,
+        "total_scored_samples": total_scored,
+        "total_truth_samples": total_truth,
+        "evaluated_samples": evaluated_samples,
+        "true_anomaly_samples": truth_anomaly_samples,
+        "model_outlier_samples": model_outlier_samples,
+        "detected_known_failures": tp,
+        "missed_known_failures": fn,
+        "false_positives": fp,
+        "true_negatives": tn,
+        "precision": precision,
+        "recall": recall,
+        "f1_score": f1_score,
+        "flag_rate": flag_rate,
+    }
+
+
+def quality_metric_flag_success_outlier(
+    scored: pd.DataFrame,
+    truth_set: list,
+    assay: str,
+    version: str,
+    split: str,
+    known_pass_set: list | None = None,
+):
+    """
+    Evaluate model performance using samples with known QC outcomes.
+
+    truth_set: sample names known to have failed QC.
+    known_pass_set: sample names known to have passed QC.
+
+    Precision and recall are calculated only for samples with
+    known outcomes that are present in the scored dataset.
+    """
+
+    scored = scored.copy()
+
+    # Aggregate to one prediction per sample.
+    sample_predictions = (
+        scored.groupby("sample_name", as_index=False)
+        .agg(model_outlier=("anomaly_label", lambda x: (x == -1).any()))
+    )
+
+    failed = set(truth_set)
+    passed = set(known_pass_set or [])
+
+    # Only samples with an explicitly known outcome can be evaluated.
+    labelled_samples = failed | passed
+    evaluated = sample_predictions[
+        sample_predictions["sample_name"].isin(labelled_samples)
+    ].copy()
+
+    evaluated["known_failed"] = evaluated["sample_name"].isin(failed)
+
+    tp = (
+        evaluated["known_failed"] & evaluated["model_outlier"]
+    ).sum()
+    fn = (
+        evaluated["known_failed"] & ~evaluated["model_outlier"]
+    ).sum()
+    fp = (
+        ~evaluated["known_failed"] & evaluated["model_outlier"]
+    ).sum()
+    tn = (
+        ~evaluated["known_failed"] & ~evaluated["model_outlier"]
+    ).sum()
+
+    precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+    recall = tp / (tp + fn) if (tp + fn) > 0 else 0
+
+    f1_denominator = precision + recall
+    f1_score = (
+        2 * precision * recall / f1_denominator
+        if f1_denominator > 0 else 0
+    )
+
+    logging.info(
+        f"\nEvaluation: {assay.upper()} | {version} | {split}\n"
+        f"Samples in scored dataset: {len(sample_predictions)}\n"
+        f"Samples with known outcomes evaluated: {len(evaluated)}\n"
+        f"True positives: {tp}\n"
+        f"False positives: {fp}\n"
+        f"False negatives: {fn}\n"
+        f"True negatives: {tn}\n"
+        f"Precision: {precision:.3f}\n"
+        f"Recall: {recall:.3f}\n"
+        f"F1-score: {f1_score:.3f}"
+    )
+
+    return {
+        "assay": assay,
+        "version": version,
+        "split": split,
+        "total_scored_samples": len(sample_predictions),
+        "evaluated_samples": len(evaluated),
+        "true_positives": int(tp),
+        "false_positives": int(fp),
+        "false_negatives": int(fn),
+        "true_negatives": int(tn),
+        "precision": precision,
+        "recall": recall,
+        "f1_score": f1_score,
+    }
 
 # ---------------------------------------------------------------------
 # Main evaluation function

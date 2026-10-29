@@ -11,9 +11,6 @@ import os
 import numpy as np
 from utils.logger import logging
 
-
-
- 
  
 def plot_flagging_rates(
     flagging_summary: dict,

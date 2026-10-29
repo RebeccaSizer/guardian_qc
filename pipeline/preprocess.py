@@ -272,6 +272,7 @@ def remove_duplicates(data_frame):
         original_len = len(data_frame)
         deduplicated_df = data_frame.drop_duplicates(subset=["sample_name"])
         final_len = len(deduplicated_df)
+
         logging.info(f"Total rows removed due to duplication: {original_len - final_len}")
 
         return deduplicated_df

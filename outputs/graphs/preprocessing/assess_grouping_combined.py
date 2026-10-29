@@ -2,9 +2,9 @@
 guardian_qc assess_grouping.py
  
 Assesses whether QC metrics differ significantly between:
-    1. Pipeline versions (solid_tumour vs solid_tumour_v3,
-                          haem_v2 vs haem_v3)
-    2. Sequencers (within each cancer type group)
+    1. Pipeline versions using NovaSeq X samples only:
+        solid_tumour vs solid_tumour_v3
+        haem_v2 vs haem_v3
  
 This determines whether data can be pooled across pipeline versions
 and/or sequencers before training per-assay Isolation Forest models,
@@ -16,7 +16,7 @@ sequencer column contains:   two sequencer identifiers
 Outputs
 -------
     assess_grouping_summary.csv     Full statistical results
-    effect_size_heatmap_all_comparisons.png
+    effect_size_heatmap_novaseqx_pipeline_versions.png
                                     One heatmap summarising effect sizes across
                                     all tested comparisons
  
@@ -296,7 +296,7 @@ def plot_all_comparisons_heatmap(
 ) -> None:
     """Create one heatmap of absolute rank-biserial effect sizes across comparisons.
 
-    Rows are QC metrics; columns are pipeline-version and sequencer comparisons.
+    Rows are QC metrics; columns are pipeline-version comparisons using NovaSeq X only.
     A '*' marks a Bonferroni-adjusted p-value below ALPHA.
     """
     required = {"metric", "comparison", "effect_r", "corrected_p"}
@@ -378,7 +378,7 @@ def plot_all_comparisons_heatmap(
             )
 
     ax.set_title(
-        "QC metric effect sizes across pipeline-version and sequencer comparisons",
+        "QC metric effect sizes between pipeline versions (NovaSeq X only)",
         fontsize=13,
         pad=14,
     )
@@ -390,7 +390,7 @@ def plot_all_comparisons_heatmap(
     fig.text(
         0.01, 0.01,
         f"* Bonferroni-adjusted p < {ALPHA}. "
-        "Colour and cell values show effect size; significance should be interpreted alongside effect size.",
+        "NovaSeq X samples only. Colour and cell values show effect size; interpret significance alongside effect size.",
         ha="left", va="bottom", fontsize=8,
     )
     fig.tight_layout(rect=[0, 0.035, 1, 1])
@@ -420,15 +420,28 @@ def run_grouping_assessment(
  
     Returns a summary DataFrame with one row per metric per comparison.
     """
+    df = df.copy()
+
+    # Restrict analysis to NovaSeq X samples before comparing pipeline versions.
+    # Handles common variants such as "NovaSeqX" and "novaseqx".
+    sequencer_normalised = (
+        df[SEQUENCER_COL].astype(str).str.lower().str.replace(" ", "", regex=False)
+    )
+    df = df.loc[sequencer_normalised.eq("novaseqx")].copy()
+
+    if df.empty:
+        raise ValueError(
+            "No NovaSeq X samples found. Check values in the 'sequencer' column."
+        )
+
     if features is None:
         features = [f for f in NUMERIC_FEATURES if f in df.columns]
- 
+
     # Fix picard_fold80 type issue
-    df = df.copy()
     df["picard_fold80"] = pd.to_numeric(
         df["picard_fold80"].replace("?", np.nan), errors="coerce"
     )
- 
+
     # Add parent group and version columns
     df["parent_group"] = df[CANCER_TYPE_COL].map(
         lambda x: PIPELINE_GROUPS.get(x, {}).get("parent", x)
@@ -504,75 +517,13 @@ def run_grouping_assessment(
             do_not_pool_metrics = comp_df[comp_df["recommendation"]=="do not pool"]["metric"].tolist()
             logging.info(f"    ✗ RECOMMENDATION: do NOT pool — differing metrics: {do_not_pool_metrics}")
  
-    # ── 2. Sequencer comparisons ──────────────────────────────────────────────
-    logging.info(f"\n{sep}")
-    logging.info("COMPARISON 2: Sequencers")
-    logging.info("Within each cancer_type, can sequencer A and B be pooled?")
-    logging.info(sep)
- 
-    for cancer_type in df[CANCER_TYPE_COL].unique():
-        ct_df      = df[df[CANCER_TYPE_COL] == cancer_type]
-        sequencers = ct_df[SEQUENCER_COL].dropna().unique()
- 
-        if len(sequencers) < 2:
-            logging.warning(f"  {cancer_type}: only one sequencer found, skipping.")
-            continue
- 
-        seq_a, seq_b = sequencers[0], sequencers[1]
-        comparison   = f"sequencer_{cancer_type}"
-        n_metrics    = len(features)
- 
-        logging.info(f"\n  {cancer_type}: {seq_a} vs {seq_b}")
-        logging.info(f"  n_{seq_a} = {(ct_df[SEQUENCER_COL]==seq_a).sum()}")
-        logging.info(f"  n_{seq_b} = {(ct_df[SEQUENCER_COL]==seq_b).sum()}")
- 
-        comp_results = []
-        for metric in features:
-            result = test_two_groups(
-                group_a       = ct_df.loc[ct_df[SEQUENCER_COL]==seq_a, metric],
-                group_b       = ct_df.loc[ct_df[SEQUENCER_COL]==seq_b, metric],
-                label_a       = seq_a,
-                label_b       = seq_b,
-                metric        = metric,
-                n_comparisons = n_metrics,
-            )
-            result["comparison"] = comparison
-            result["cancer_type_tested"] = cancer_type
-            comp_results.append(result)
-            all_results.append(result)
- 
-            logging.info(
-                f"    {metric:<45} "
-                f"p={result['corrected_p']:.4f}  "
-                f"r={result['effect_r']:.3f} ({result['effect_interp']})  "
-                f"→ {result['recommendation']}"
-            )
- 
-        comp_df = pd.DataFrame(comp_results)
- 
-        # Overall recommendation
-        n_do_not_pool = (comp_df["recommendation"] == "do not pool").sum()
-        n_review      = (comp_df["recommendation"] == "review").sum()
-        logging.info(f"\n  Summary for {cancer_type} sequencer comparison:")
-        logging.info(f"    Safe to pool:   {(comp_df['recommendation'].str.startswith('pool')).sum()} / {n_metrics}")
-        logging.info(f"    Review:         {n_review} / {n_metrics}")
-        logging.info(f"    Do not pool:    {n_do_not_pool} / {n_metrics}")
-        if n_do_not_pool == 0 and n_review == 0:
-            logging.info(f"    ✓ RECOMMENDATION: pool {seq_a} and {seq_b} for {cancer_type}")
-        elif n_do_not_pool == 0:
-            metrics_to_review = comp_df[comp_df["recommendation"]=="review"]["metric"].tolist()
-            logging.info(f"    ~ RECOMMENDATION: likely poolable — review: {metrics_to_review}")
-        else:
-            do_not_pool_metrics = comp_df[comp_df["recommendation"]=="do not pool"]["metric"].tolist()
-            logging.info(f"    ✗ RECOMMENDATION: do NOT pool — differing metrics: {do_not_pool_metrics}")
- 
     # ── Final summary ─────────────────────────────────────────────────────────
     summary_df = pd.DataFrame(all_results)
 
-    # One summary heatmap for all tested comparisons.
+    # Summary heatmap of pipeline-version comparisons using NovaSeq X only.
     plot_all_comparisons_heatmap(
         results_df=summary_df,
-        out_path=os.path.join(out_dir, "effect_size_heatmap_all_comparisons.png"),
+        out_path=os.path.join(out_dir, "effect_size_heatmap_novaseqx_pipeline_versions.png"),
     )
 
     out_path   = os.path.join(out_dir, "assess_grouping_summary.csv")

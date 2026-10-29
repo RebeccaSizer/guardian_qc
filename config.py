@@ -99,7 +99,7 @@ PREPROCESSING_PLOT_DIR = 'outputs/graphs/preprocessing/'
 # set up variables for train_n.py
 #################################
 
-N_ESTIMATORS = 100 # The number of base estimators in the ensemble (Number of decision trees) - can up to 300 if needed
+N_ESTIMATORS = 300 # The number of base estimators in the ensemble (Number of decision trees) - can up to 300 if needed
 RANDOM_STATE = 42 # Controls the pseudo-randomness of the selection of the features and the split values - needed to build a reproducible random sequence
  
 # Top features to report
