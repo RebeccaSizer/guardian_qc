@@ -133,20 +133,29 @@ def quality_metric_flag_success_all(
             )
 
     # Keep only the sample ID and true label from the truth set.
-    truth = truth_set[["sample_name", "truth_label"]].rename(
-        columns={"truth_label": "true_label"}
+    truth = truth_set[["sample_name", "anomaly_label"]].rename(
+        columns={"anomaly_label": "true_label"}
     )
 
     # Aggregate model predictions to one prediction per sample.
     # A sample is an anomaly if any of its rows was flagged.
     predictions = (
         scored
-        .agg(predicted_label=(
+        .groupby("sample_name")
+        .agg(
+            predicted_label=(
                 "anomaly_label",
                 lambda x: -1 if (x == -1).any() else 1
             )
         )
+        .reset_index()
     )
+
+    print("Predictions columns:")
+    print(predictions.columns.tolist())
+
+    print("\nTruth set columns:")
+    print(truth.columns.tolist())
 
     invalid_labels = set(truth["true_label"].dropna().unique()) - {-1, 1}
     if invalid_labels:
@@ -284,7 +293,7 @@ def evaluate_model(
         *config.ROBUST_Z_COLUMNS,
     }
 
-    required_truth = {"sample", "truth_label"}
+    required_truth = {"sample_name", "anomaly_label"}
 
     missing_model = required_model - set(model.columns)
     missing_truth = required_truth - set(truth.columns)
@@ -309,14 +318,14 @@ def evaluate_model(
 
     # Clean sample identifiers.
     model["sample_name"] = clean_sample_name(model["sample_name"])
-    truth["sample"] = clean_sample_name(truth["sample"])
+    truth["sample_name"] = clean_sample_name(truth["sample_name"])
 
     model = model.dropna(subset=["sample_name"])
-    truth = truth.dropna(subset=["sample"])
+    truth = truth.dropna(subset=["sample_name"])
 
     # Standardise anomaly labels.
     model["anomaly_label"] = model["anomaly_label"].map(normalise_label)
-    truth["truth_label"] = truth["truth_label"].map(normalise_label)
+    truth["anomaly_label"] = truth["anomaly_label"].map(normalise_label)
 
     # Check that model output contains one record per sample.
     # If samples can recur across runs, use a shared unique identifier
@@ -333,7 +342,7 @@ def evaluate_model(
         )
 
     # Check that each sample has one consistent truth anomaly label.
-    truth_label_counts = truth.groupby("sample")["truth_label"].nunique()
+    truth_label_counts = truth.groupby("sample_name")["anomaly_label"].nunique()
     inconsistent = truth_label_counts[truth_label_counts > 1].index.tolist()
 
     if inconsistent:
@@ -345,10 +354,10 @@ def evaluate_model(
     # Group truth data to create one record per sample.
     # Combine all truth_feature_* columns into a single list of features.
     truth_by_sample = (
-        truth.groupby("sample")
+        truth.groupby("sample_name")
         .apply(
             lambda group: pd.Series({
-                "truth_anomaly": group["truth_label"].iloc[0],
+                "truth_anomaly": group["anomaly_label"].iloc[0],
                 "truth_features": sorted({
                     feature
                     for col in truth_feature_columns
@@ -359,7 +368,6 @@ def evaluate_model(
             include_groups=False,
         )
         .reset_index()
-        .rename(columns={"sample": "sample_name"})
     )
 
     # Match truth samples to model predictions.
