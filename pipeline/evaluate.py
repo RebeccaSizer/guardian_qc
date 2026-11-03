@@ -67,22 +67,20 @@ def get_predicted_features(row: pd.Series, columns: list[str]) -> set[str]:
 def evaluate_reason_method(row: pd.Series, columns: list[str]) -> dict:
     """Compare predicted explanation features against known truth features."""
 
-    # Collect truth features from all truth_feature_* columns.
-    truth_columns = [
-        col for col in row.index
-        if col.startswith("truth_feature_")
-    ]
-
-    true_features = {
-        str(row[col]).strip()
-        for col in truth_columns
-        if pd.notna(row[col]) and str(row[col]).strip()
-    }
+    # truth_features is already a cleaned (lowercased) list built in evaluate_model.
+    truth_features = row.get("truth_features")
+    true_features = (
+        set(truth_features)
+        if isinstance(truth_features, (list, set, tuple))
+        else set()
+    )
 
     predicted_features = get_predicted_features(row, columns)
 
     # Explanation quality is only assessed for known anomalies.
-    if row["truth_anomaly"] != -1 or not true_features:
+    is_anomaly = pd.notna(row["truth_anomaly"]) and row["truth_anomaly"] == -1
+
+    if not is_anomaly or not true_features:
         return {
             "predicted_features": sorted(predicted_features),
             "matching_features": [],
@@ -97,11 +95,12 @@ def evaluate_reason_method(row: pd.Series, columns: list[str]) -> dict:
         "predicted_features": sorted(predicted_features),
         "matching_features": sorted(matches),
         "reason_hit": bool(matches),
-        "reason_precision": len(matches) / len(predicted_features)
-        if predicted_features else 0.0,
+        "reason_precision": (
+            len(matches) / len(predicted_features)
+            if predicted_features else 0.0
+        ),
         "reason_recall": len(matches) / len(true_features),
     }
-
 
 def quality_metric_flag_success_all(
     scored: pd.DataFrame,
@@ -531,7 +530,6 @@ def evaluate_model(
         & reason_results["truth_features"].map(bool)
     ].copy()
 
-    # Summarise SHAP and robust Z-score explanation performance.
     summaries = []
 
     for method_name in ["shap", "robust_z"]:
@@ -539,22 +537,21 @@ def evaluate_model(
         precision_col = f"{method_name}_reason_precision"
         recall_col = f"{method_name}_reason_recall"
 
-        hits = valid[hit_col].dropna().astype(bool)
+        # Columns mix pd.NA with numbers (object dtype), so force numeric.
+        hits = pd.to_numeric(valid[hit_col], errors="coerce").dropna()
+        precisions = pd.to_numeric(valid[precision_col], errors="coerce")
+        recalls = pd.to_numeric(valid[recall_col], errors="coerce")
 
         summaries.append({
             "method": method_name,
             "anomalous_samples_with_reference_reasons": len(valid),
             "samples_with_any_correct_reason": int(hits.sum()),
-            "reason_hit_rate": (
-                hits.mean() if len(hits) else float("nan")
-            ),
+            "reason_hit_rate": hits.mean() if len(hits) else float("nan"),
             "mean_reason_precision": (
-                valid[precision_col].mean()
-                if len(valid) else float("nan")
+                precisions.mean() if precisions.notna().any() else float("nan")
             ),
             "mean_reason_recall": (
-                valid[recall_col].mean()
-                if len(valid) else float("nan")
+                recalls.mean() if recalls.notna().any() else float("nan")
             ),
         })
 
@@ -793,7 +790,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    OUTPUT_DIR = os.path.join("data/evaluate", args.assay, args.version )
+    OUTPUT_DIR = os.path.join("data/evaluate")
 
 
     results = evaluate_model(

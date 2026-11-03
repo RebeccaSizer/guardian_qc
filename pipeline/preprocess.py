@@ -966,33 +966,10 @@ def run_preprocessing(file_path: str, assay: str, version: str, out_dir: None):
     logging.info(f"Correlation matrix saved for assay: {assay}")
     
     if assay.lower() == 'haem':
-        columns_to_drop = [
-            'bcftools_ts',
-            'picard_pf_reads',
-            'picard_mean_target_coverage',
-            'picard_mean_insert',
-            'fastqc_basic_status_pass|pass',
-            'fastqc_basic_status_pass|pass|pass|pass',
-            'bcftools_variants',
-            'picard_target_bases_20x',
-            'picard_target_bases_30x',
-            'picard_target_bases_50x'
-        ]
+        columns_to_drop = config.COL_TO_DROP_HAEM
 
     elif assay.lower() == 'st':
-        columns_to_drop = [
-            'picard_total_reads',
-            'picard_pf_reads',
-            'picard_mean_target_coverage',
-            'picard_mean_insert',
-            'picard_median_target_coverage',
-            'fastqc_basic_status_pass|pass',
-            'fastqc_basic_status_pass|pass|pass|pass',
-            'bcftools_variants',
-            'picard_target_bases_20x',
-            'picard_target_bases_30x',
-            'picard_target_bases_50x'
-        ]
+        columns_to_drop = config.COL_TO_DROP_ST
 
     # Only drop columns that are actually present
     to_drop = [

@@ -94,13 +94,41 @@ PREPROCESSING_OUTDIR = 'models/preprocessing/'
 #UNSUPERVISED_MODELS_DIR = 'models/unsupervised/'
 PREPROCESSING_PLOT_DIR = 'outputs/graphs/preprocessing/'
 
+COL_TO_DROP_ST = [
+            'picard_mean_insert',
+            'picard_median_insert',
+            'picard_mad_insert',
+            'picard_mean_target_coverage',
+            'fastqc_basic_status_pass|pass',
+            'fastqc_basic_status_pass|pass|pass|pass',
+            'picard_target_bases_20x',
+            'picard_target_bases_30x',
+            'picard_target_bases_50x'
+            'fastp_duplication_rate'
+        ]
+
+COL_TO_DROP_HAEM = [
+            'bcftools_ts',
+            'picard_pf_reads',
+            'picard_mean_target_coverage',
+            'picard_mean_insert',
+            'fastqc_basic_status_pass|pass',
+            'fastqc_basic_status_pass|pass|pass|pass',
+            'bcftools_variants',
+            'picard_target_bases_20x',
+            'picard_target_bases_30x',
+            'picard_target_bases_50x'
+        ]
+
 
 #################################
 # set up variables for train_n.py
 #################################
 
-N_ESTIMATORS = 300 # The number of base estimators in the ensemble (Number of decision trees) - can up to 300 if needed
+N_ESTIMATORS = 100 # The number of base estimators in the ensemble (Number of decision trees) - can up to 300 if needed
 RANDOM_STATE = 42 # Controls the pseudo-randomness of the selection of the features and the split values - needed to build a reproducible random sequence
+MAX_SAMPLES = 256
+MAX_FEATURES = 1.0
  
 # Top features to report
 TOP_N_FEATURES = 3

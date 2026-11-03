@@ -675,19 +675,16 @@ def run_model_train(X_train, X_test, train_meta, test_meta, assay, version, cont
     test_results  = attach_metadata(X_test_scored,  test_meta)
 
     if assay == 'haem':
-        features = ['bcftools_tv', 'bcftools_tstv', 'bcftools_snvs', 'bcftools_indels', 
-                    'picard_mode_insert', 'picard_median_insert', 'picard_mad_insert', 
-                    'picard_total_reads', 'picard_pf_q30_bases', 'picard_read_length', 
-                    'picard_at_dropout', 'picard_fold_enrichment', 'picard_fold80', 
-                    'picard_median_target_coverage', 'picard_target_bases_100x', 
-                    'fastqc_duplication_rate', 'fastp_duplication_rate']
+        features = [col for col in X_train_scored.columns if col not in config.COL_TO_DROP_HAEM]
+        features.remove("anomaly_score")
+        features.remove("anomaly_label")
+        print(f"Features used for {assay}: {features}")
+
     if assay == 'st':
-        features = ['bcftools_ts', 'bcftools_tv', 'bcftools_tstv', 'bcftools_snvs', 
-                    'bcftools_indels', 'picard_mode_insert', 'picard_median_insert', 
-                    'picard_mad_insert', 'picard_pf_q30_bases', 'picard_read_length', 
-                    'picard_at_dropout', 'picard_gc_dropout', 'picard_fold_enrichment', 
-                    'picard_fold80', 'picard_target_bases_100x', 'fastqc_duplication_rate', 
-                    'fastp_duplication_rate']
+        features = [col for col in X_train_scored.columns if col not in config.COL_TO_DROP_ST]
+        features.remove("anomaly_score")
+        features.remove("anomaly_label")
+        print(f"Features used for {assay}: {features}")
 
     # Plot distribution
     #plot_score_distribution(X_train_scored, X_test_scored, assay, os.path.join(config.TRAINING_PLOT_DIR, assay, version))
@@ -797,4 +794,4 @@ if __name__ == "__main__":
     X_train, X_test, train_meta, test_meta = run_preprocessing(config.SUMMARY_QC_METRICS, args.assay, out_dir=None, version=args.version)
 
     # The default values are: contamination 0.08 for haem and 15% for st. n_estimators = 100, max_samples = 256, max_features = 1.0
-    explained_model_train, explained_model_test = run_model_train(X_train, X_test, train_meta, test_meta, args.assay, args.version, contamination, 100, 256, 1.0, os.path.join(config.TRAINED_OUTPUT_DATA, args.assay, args.version ))
+    explained_model_train, explained_model_test = run_model_train(X_train, X_test, train_meta, test_meta, args.assay, args.version, contamination, config.N_ESTIMATORS, config.MAX_SAMPLES, config.MAX_FEATURES, os.path.join(config.TRAINED_OUTPUT_DATA, args.assay, args.version ))
