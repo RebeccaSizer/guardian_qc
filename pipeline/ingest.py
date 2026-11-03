@@ -504,7 +504,6 @@ def filter_run_qc(df):
             run_folder_name = Path(run_folder_path).name
 
             run_df = inter_op_qc(run_folder_path)
-            print(run_df)
 
             # Get Lane information to select correct values from the run_qc pulled using interop
             if pd.notna(row["sequencer"]) and "novaseqx" in row["sequencer"].lower():

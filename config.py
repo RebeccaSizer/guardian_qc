@@ -109,3 +109,11 @@ TOP_N_FEATURES = 3
 TRAINED_COMPOSITE_MODEL_OUTDIR = 'models/trained/composite'
 TRAINING_PLOT_DIR = 'outputs/graphs/train'
 TRAINED_OUTPUT_DATA = 'data/trained'
+
+#################################
+# set up variables for evaluate.py
+##################################
+
+TRUTH_SET_DIR = 'data/raw/'#
+SHAP_COLUMNS = ["top_1_metric", "top_2_metric", "top_3_metric"]
+ROBUST_Z_COLUMNS = ["top_1_feature", "top_2_feature", "top_3_feature"]

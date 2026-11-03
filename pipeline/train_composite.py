@@ -68,16 +68,9 @@ from pipeline.preprocess import run_preprocessing
 from utils.logger import logging
 import config
 import argparse
-from sklearn.metrics import (
-    precision_recall_curve,
-    average_precision_score,
-    PrecisionRecallDisplay,
-)
 import seaborn as sns
 import matplotlib.pyplot as plt
-import matplotlib.ticker as mtick
 import shap 
-from pathlib import Path
 
 
 #####################
@@ -85,7 +78,7 @@ from pathlib import Path
 ####################
 # Unsupervised model training
 # Isolation forest
-def fit_isolation_forest(X_train: pd.DataFrame, assay: str, version: str, contamination: float):
+def fit_isolation_forest(X_train: pd.DataFrame, assay: str, version: str, contamination: float, n_estimators: int, max_samples: int, max_features:int):
     """
     Fit an Isolation Forest on a single assay's preprocessed training data.
    
@@ -101,13 +94,15 @@ def fit_isolation_forest(X_train: pd.DataFrame, assay: str, version: str, contam
     Return:
         IsolationForest: Fitted model
     """
-    logging.info(f"[{assay}_{version}] Fitting isolation forest |"
+    logging.info(f"[{assay}_{version}] Fitting isolation forest | "
                  f"n_samples={len(X_train)} | n_features={X_train.shape[1]}"
                  f"contamination={contamination}")
    
     model = IsolationForest(
-        n_estimators=config.N_ESTIMATORS,
+        n_estimators=n_estimators,
         contamination=contamination,
+        max_samples=max_samples,
+        max_features=max_features,
         random_state=config.RANDOM_STATE,
         n_jobs=-1 #run jobs in parallel
     )
@@ -118,21 +113,21 @@ def fit_isolation_forest(X_train: pd.DataFrame, assay: str, version: str, contam
  
  
 # Save the models to a set location
- 
-def save_model(model: IsolationForest, assay: str, version: str, outdir: str) -> None:
+def save_model(model: IsolationForest, assay: str, version: str, contamination, n_estimators, max_samples, max_features, outdir: str) -> None:
     """ Save a fitted IsolationForest to disk"""
  
     os.makedirs(outdir, exist_ok = True)
-    path = os.path.join(outdir, f"{assay}_{version}_isolation_forest.pkl")
+    path = os.path.join(outdir, f"{assay}_{version}_c{contamination}_n{n_estimators}_ms{max_samples}_mf{max_features}_isolation_forest.pkl")
     joblib.dump(model, path)
  
     logging.info(f"{assay}_{version} | Model saved to {path}")
- 
+
+
 # Load the models
-def load_model(assay: str, version: str, model_dir: str) -> IsolationForest:
+def load_model(assay: str, version: str, contamination, n_estimators, max_samples, max_features, model_dir: str) -> IsolationForest:
     """ Load a fitted IsolationForest model"""
 
-    path = os.path.join(model_dir, f"{assay}_{version}_isolation_forest.pkl")
+    path = os.path.join(model_dir, f"{assay}_{version}_c{contamination}_n{n_estimators}_ms{max_samples}_mf{max_features}_isolation_forest.pkl")
     model = joblib.load(path)
     logging.info(f"[{assay}_{version}] Model loaded from path {path}")
     return model
@@ -227,7 +222,6 @@ def explain_outlier(
 
     #print(f"explain outlier result: {result}")
     return result
-
 
 
 def explain_all_outliers(
@@ -667,24 +661,18 @@ def plot_shap(X_scored, model, features, assay, version, out_dir):
 # Run all
 #########################
  
-def run_model_train(X_train, X_test, train_meta, test_meta, assay, version, split, contamination, out_dir):
+def run_model_train(X_train, X_test, train_meta, test_meta, assay, version, contamination, n_estimators, max_samples, max_features, out_dir):
     os.makedirs(out_dir, exist_ok=True)
 
-    model = fit_isolation_forest(X_train, assay, version, contamination)
-    save_model(model, assay, version, os.path.join(config.TRAINED_COMPOSITE_MODEL_OUTDIR, assay))
+    model = fit_isolation_forest(X_train, assay, version, contamination, n_estimators, max_samples, max_features)
+    save_model(model, assay, version, contamination, n_estimators, max_samples, max_features, os.path.join(config.TRAINED_COMPOSITE_MODEL_OUTDIR, assay, version))
 
     X_train_scored = score_samples(model, X_train, assay, version, 'train')
     X_test_scored = score_samples(model, X_test, assay, version, 'test')
 
-    print("Duplicates in train_results in X_test_scored:")
-    print(X_test_scored.shape)
-
     # Attach metadata so you can identify samples by name
     train_results = attach_metadata(X_train_scored, train_meta)
     test_results  = attach_metadata(X_test_scored,  test_meta)
-
-    print("Duplicates in train_results in X_test_scored:")
-    print(train_results.shape)
 
     if assay == 'haem':
         features = ['bcftools_tv', 'bcftools_tstv', 'bcftools_snvs', 'bcftools_indels', 
@@ -759,8 +747,8 @@ def run_model_train(X_train, X_test, train_meta, test_meta, assay, version, spli
 
     # Save the full scored + metadata output for manual review
     os.makedirs(out_dir, exist_ok=True)
-    model_output_train.to_csv(os.path.join(out_dir, f"{assay}_{version}_train_scored.csv"), index=True)
-    model_output_test.to_csv( os.path.join(out_dir, f"{assay}_{version}_test_scored.csv"),  index=True)
+    model_output_train.to_csv(os.path.join(out_dir, f"{assay}_{version}_c{contamination}, n{n_estimators}_ms{max_samples}_mf{max_features}_train_scored.csv"), index=True)
+    model_output_test.to_csv( os.path.join(out_dir, f"{assay}_{version}_c{contamination}, n{n_estimators}_ms{max_samples}_mf{max_features}_test_scored.csv"),  index=True)
     logging.info(f"[{assay}] Scored outputs with metadata saved to {out_dir}")
 
     logging.info(f"Training complete. model_output_train: {model_output_train.shape}")
@@ -808,4 +796,5 @@ if __name__ == "__main__":
 
     X_train, X_test, train_meta, test_meta = run_preprocessing(config.SUMMARY_QC_METRICS, args.assay, out_dir=None, version=args.version)
 
-    explained_model_train, explained_model_test = run_model_train(X_train, X_test, train_meta, test_meta, args.assay, args.version, args.split, contamination, os.path.join('data/processed/from_model/', args.assay ))
+    # The default values are: contamination 0.08 for haem and 15% for st. n_estimators = 100, max_samples = 256, max_features = 1.0
+    explained_model_train, explained_model_test = run_model_train(X_train, X_test, train_meta, test_meta, args.assay, args.version, contamination, 100, 256, 1.0, os.path.join(config.TRAINED_OUTPUT_DATA, args.assay, args.version ))

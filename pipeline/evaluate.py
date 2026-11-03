@@ -16,18 +16,8 @@ from sklearn.metrics import (
     precision_score,
     recall_score,
 )
-
-# ---------------------------------------------------------------------
-# Configuration
-# ---------------------------------------------------------------------
-
-MODEL_FILE = Path("data/processed/from_model/st/st_v2_v3_test_scored.csv")
-TRUTH_FILE = Path("data/raw/ST_for_validation.csv")
-OUTPUT_DIR = Path("data/evaluate/")
-
-SHAP_COLUMNS = ["top_1_metric", "top_2_metric", "top_3_metric"]
-ROBUST_Z_COLUMNS = ["top_1_feature", "top_2_feature", "top_3_feature"]
-
+import config
+import argparse
 
 # ---------------------------------------------------------------------
 # Helper functions
@@ -76,7 +66,19 @@ def get_predicted_features(row: pd.Series, columns: list[str]) -> set[str]:
 
 def evaluate_reason_method(row: pd.Series, columns: list[str]) -> dict:
     """Compare predicted explanation features against known truth features."""
-    true_features = set(row["truth_features"])
+
+    # Collect truth features from all truth_feature_* columns.
+    truth_columns = [
+        col for col in row.index
+        if col.startswith("truth_feature_")
+    ]
+
+    true_features = {
+        str(row[col]).strip()
+        for col in truth_columns
+        if pd.notna(row[col]) and str(row[col]).strip()
+    }
+
     predicted_features = get_predicted_features(row, columns)
 
     # Explanation quality is only assessed for known anomalies.
@@ -90,6 +92,7 @@ def evaluate_reason_method(row: pd.Series, columns: list[str]) -> dict:
         }
 
     matches = true_features & predicted_features
+
     return {
         "predicted_features": sorted(predicted_features),
         "matching_features": sorted(matches),
@@ -98,19 +101,6 @@ def evaluate_reason_method(row: pd.Series, columns: list[str]) -> dict:
         if predicted_features else 0.0,
         "reason_recall": len(matches) / len(true_features),
     }
-
-def get_truth_set(out_dir, assay):
-
-    file_path = os.path.join(out_dir, f"qc_fail_{assay}.tsv")
-
-    truth_set = []
-
-    with open(file_path, "r") as qc_fail:
-            for line in qc_fail:
-                line = line.strip()
-                truth_set.append(line)
-
-    return truth_set
 
 
 def quality_metric_flag_success_all(
@@ -144,34 +134,20 @@ def quality_metric_flag_success_all(
             )
 
     # Keep only the sample ID and true label from the truth set.
-    truth = truth_set[["sample_name", "anomaly_label"]].rename(
-        columns={"anomaly_label": "true_label"}
+    truth = truth_set[["sample_name", "truth_label"]].rename(
+        columns={"truth_label": "true_label"}
     )
 
     # Aggregate model predictions to one prediction per sample.
     # A sample is an anomaly if any of its rows was flagged.
     predictions = (
-        scored.groupby("sample_name", as_index=False)
-        .agg(
-            predicted_label=(
+        scored
+        .agg(predicted_label=(
                 "anomaly_label",
                 lambda x: -1 if (x == -1).any() else 1
             )
         )
     )
-
-    # Require one unambiguous truth label per sample.
-    if truth["sample_name"].duplicated().any():
-        conflicting = truth.groupby("sample_name")["true_label"].nunique()
-        conflicting = conflicting[conflicting > 1].index.tolist()
-
-        if conflicting:
-            raise ValueError(
-                "Samples have conflicting truth labels: "
-                f"{conflicting[:10]}"
-            )
-
-        truth = truth.drop_duplicates(subset="sample_name")
 
     invalid_labels = set(truth["true_label"].dropna().unique()) - {-1, 1}
     if invalid_labels:
@@ -264,93 +240,6 @@ def quality_metric_flag_success_all(
     }
 
 
-def quality_metric_flag_success_outlier(
-    scored: pd.DataFrame,
-    truth_set: list,
-    assay: str,
-    version: str,
-    split: str,
-    known_pass_set: list | None = None,
-):
-    """
-    Evaluate model performance using samples with known QC outcomes.
-
-    truth_set: sample names known to have failed QC.
-    known_pass_set: sample names known to have passed QC.
-
-    Precision and recall are calculated only for samples with
-    known outcomes that are present in the scored dataset.
-    """
-
-    scored = scored.copy()
-
-    # Aggregate to one prediction per sample.
-    sample_predictions = (
-        scored.groupby("sample_name", as_index=False)
-        .agg(model_outlier=("anomaly_label", lambda x: (x == -1).any()))
-    )
-
-    failed = set(truth_set)
-    passed = set(known_pass_set or [])
-
-    # Only samples with an explicitly known outcome can be evaluated.
-    labelled_samples = failed | passed
-    evaluated = sample_predictions[
-        sample_predictions["sample_name"].isin(labelled_samples)
-    ].copy()
-
-    evaluated["known_failed"] = evaluated["sample_name"].isin(failed)
-
-    tp = (
-        evaluated["known_failed"] & evaluated["model_outlier"]
-    ).sum()
-    fn = (
-        evaluated["known_failed"] & ~evaluated["model_outlier"]
-    ).sum()
-    fp = (
-        ~evaluated["known_failed"] & evaluated["model_outlier"]
-    ).sum()
-    tn = (
-        ~evaluated["known_failed"] & ~evaluated["model_outlier"]
-    ).sum()
-
-    precision = tp / (tp + fp) if (tp + fp) > 0 else 0
-    recall = tp / (tp + fn) if (tp + fn) > 0 else 0
-
-    f1_denominator = precision + recall
-    f1_score = (
-        2 * precision * recall / f1_denominator
-        if f1_denominator > 0 else 0
-    )
-
-    logging.info(
-        f"\nEvaluation: {assay.upper()} | {version} | {split}\n"
-        f"Samples in scored dataset: {len(sample_predictions)}\n"
-        f"Samples with known outcomes evaluated: {len(evaluated)}\n"
-        f"True positives: {tp}\n"
-        f"False positives: {fp}\n"
-        f"False negatives: {fn}\n"
-        f"True negatives: {tn}\n"
-        f"Precision: {precision:.3f}\n"
-        f"Recall: {recall:.3f}\n"
-        f"F1-score: {f1_score:.3f}"
-    )
-
-    return {
-        "assay": assay,
-        "version": version,
-        "split": split,
-        "total_scored_samples": len(sample_predictions),
-        "evaluated_samples": len(evaluated),
-        "true_positives": int(tp),
-        "false_positives": int(fp),
-        "false_negatives": int(fn),
-        "true_negatives": int(tn),
-        "precision": precision,
-        "recall": recall,
-        "f1_score": f1_score,
-    }
-
 # ---------------------------------------------------------------------
 # Main evaluation function
 # ---------------------------------------------------------------------
@@ -360,50 +249,83 @@ def evaluate_model(
     truth_file: str | Path,
     assay: str,
     version: str,
-    out_dir: str | Path = OUTPUT_DIR,
+    out_dir: str
 ) -> dict:
     """
     Evaluate predictions and explanations for one assay/version.
 
+    The truth file must contain:
+        - sample
+        - anomaly
+        - one or more truth_feature_* columns
+
     Returns a dictionary of DataFrames/Series needed by graphs_for_evaluation().
+
     Writes the detailed evaluation CSVs to:
         out_dir / assay / version
     """
     result_dir = Path(out_dir) / assay / version
     result_dir.mkdir(parents=True, exist_ok=True)
 
+    # Load model predictions and truth data.
     model = pd.read_csv(scored_data)
     truth = pd.read_csv(truth_file)
 
+    # Identify all truth feature columns automatically.
+    truth_feature_columns = [
+        col for col in truth.columns
+        if col.startswith("truth_feature_")
+    ]
+
+    # Check that all required columns are present.
     required_model = {
-        "sample_name", "anomaly_label",
-        *SHAP_COLUMNS, *ROBUST_Z_COLUMNS,
+        "sample_name",
+        "anomaly_label",
+        *config.SHAP_COLUMNS,
+        *config.ROBUST_Z_COLUMNS,
     }
-    required_truth = {"sample", "anomaly", "feature"}
+
+    required_truth = {"sample", "truth_label"}
 
     missing_model = required_model - set(model.columns)
     missing_truth = required_truth - set(truth.columns)
+
     if missing_model:
-        raise ValueError(f"Missing model columns: {sorted(missing_model)}")
+        raise ValueError(
+            f"Missing model columns: {sorted(missing_model)}"
+        )
+
     if missing_truth:
-        raise ValueError(f"Missing truth-set columns: {sorted(missing_truth)}")
+        raise ValueError(
+            f"Missing truth-set columns: {sorted(missing_truth)}"
+        )
+
+    if not truth_feature_columns:
+        raise ValueError(
+            "No truth_feature_* columns found in truth set."
+        )
 
     model = model.copy()
     truth = truth.copy()
 
+    # Clean sample identifiers.
     model["sample_name"] = clean_sample_name(model["sample_name"])
     truth["sample"] = clean_sample_name(truth["sample"])
+
     model = model.dropna(subset=["sample_name"])
     truth = truth.dropna(subset=["sample"])
 
+    # Standardise anomaly labels.
     model["anomaly_label"] = model["anomaly_label"].map(normalise_label)
-    truth["anomaly"] = truth["anomaly"].map(normalise_label)
+    truth["truth_label"] = truth["truth_label"].map(normalise_label)
 
-    # This script expects one model record per sample. If samples can recur
-    # across runs, match on a shared unique ID (e.g. sample + worklist) instead.
+    # Check that model output contains one record per sample.
+    # If samples can recur across runs, use a shared unique identifier
+    # (e.g. sample_name + worklist) instead.
     duplicate_names = model.loc[
         model["sample_name"].duplicated(keep=False), "sample_name"
     ].unique()
+
     if len(duplicate_names):
         raise ValueError(
             "Duplicate sample_name values in model output. Match using a shared "
@@ -411,29 +333,38 @@ def evaluate_model(
             f"evaluating. Examples: {duplicate_names[:10].tolist()}"
         )
 
-    truth_label_counts = truth.groupby("sample")["anomaly"].nunique()
+    # Check that each sample has one consistent truth anomaly label.
+    truth_label_counts = truth.groupby("sample")["truth_label"].nunique()
     inconsistent = truth_label_counts[truth_label_counts > 1].index.tolist()
+
     if inconsistent:
         raise ValueError(
             "Truth-set anomaly labels conflict within these samples: "
             f"{inconsistent[:10]}"
         )
 
+    # Group truth data to create one record per sample.
+    # Combine all truth_feature_* columns into a single list of features.
     truth_by_sample = (
-        truth.groupby("sample", as_index=False)
-        .agg(
-            truth_anomaly=("anomaly", "first"),
-            truth_features=(
-                "feature",
-                lambda values: sorted({
-                    feature for value in values
+        truth.groupby("sample")
+        .apply(
+            lambda group: pd.Series({
+                "truth_anomaly": group["truth_label"].iloc[0],
+                "truth_features": sorted({
+                    feature
+                    for col in truth_feature_columns
+                    for value in group[col]
                     if (feature := clean_feature(value)) is not None
                 }),
-            ),
+            }),
+            include_groups=False,
         )
+        .reset_index()
         .rename(columns={"sample": "sample_name"})
     )
 
+    # Match truth samples to model predictions.
+    # All truth samples are retained, even if no model prediction exists.
     evaluation = truth_by_sample.merge(
         model,
         on="sample_name",
@@ -441,42 +372,70 @@ def evaluate_model(
         indicator=True,
         validate="one_to_one",
     )
+
     evaluation["sample_present"] = evaluation["_merge"].eq("both")
     evaluation.drop(columns="_merge", inplace=True)
+
+    # Identify whether each model classification agrees with the truth.
     evaluation["classification_correct"] = (
         evaluation["sample_present"]
         & evaluation["truth_anomaly"].eq(evaluation["anomaly_label"])
     )
 
-    evaluation.to_csv(result_dir / "sample_level_evaluation.csv", index=False)
+    evaluation.to_csv(
+        result_dir / "sample_level_evaluation.csv",
+        index=False,
+    )
 
+    # Save truth samples that were not present in the model output.
     missing_samples = evaluation.loc[
-        ~evaluation["sample_present"], ["sample_name", "truth_anomaly"]
+        ~evaluation["sample_present"],
+        ["sample_name", "truth_anomaly"],
     ]
-    missing_samples.to_csv(result_dir / "missing_truth_samples.csv", index=False)
 
+    missing_samples.to_csv(
+        result_dir / "missing_truth_samples.csv",
+        index=False,
+    )
+
+    # Save model samples that were not present in the truth set.
     extra_samples = model.loc[
         ~model["sample_name"].isin(truth_by_sample["sample_name"])
     ]
-    extra_samples.to_csv(result_dir / "model_samples_not_in_truth.csv", index=False)
 
+    extra_samples.to_csv(
+        result_dir / "model_samples_not_in_truth.csv",
+        index=False,
+    )
+
+    # Only matched samples can be used for classification evaluation.
     matched = evaluation.loc[evaluation["sample_present"]].copy()
+
     if matched.empty:
-        raise ValueError("No sample names matched between model output and truth set.")
+        raise ValueError(
+            "No sample names matched between model output and truth set."
+        )
+
+    # Check for missing model predictions before calculating metrics.
+    if matched["anomaly_label"].isna().any():
+        raise ValueError(
+            "Some matched model records have missing anomaly_label values."
+        )
 
     y_true = matched["truth_anomaly"].astype(int)
-    y_pred = matched["anomaly_label"]
+    y_pred = matched["anomaly_label"].astype(int)
 
-    # False positives: model flags a normal sample as anomalous
+    # Identify false-positive and false-negative samples.
+    # False positive: model flags a normal sample as anomalous.
     false_positives = matched.loc[
         (y_true == 1) & (y_pred == -1),
-        "sample_name"
+        "sample_name",
     ]
 
-    # False negatives: model predicts normal, but the truth says anomalous
+    # False negative: model predicts normal, but truth says anomalous.
     false_negatives = matched.loc[
         (y_true == -1) & (y_pred == 1),
-        "sample_name"
+        "sample_name",
     ]
 
     print("\nFALSE POSITIVE SAMPLES")
@@ -486,15 +445,15 @@ def evaluate_model(
     print("\nFALSE NEGATIVE SAMPLES")
     print(f"Count: {len(false_negatives)}")
     print(false_negatives.to_string(index=False))
-    
-    if y_pred.isna().any():
-        raise ValueError("Some matched model records have missing anomaly_label values.")
-    y_pred = y_pred.astype(int)
 
-    # Labels are ordered [normal, anomaly], so the matrix is [[TN, FP], [FN, TP]].
+    # Calculate the confusion matrix.
+    # Labels are ordered [normal, anomaly]:
+    # [[TN, FP],
+    #  [FN, TP]]
     cm = confusion_matrix(y_true, y_pred, labels=[1, -1])
     tn, fp, fn, tp = cm.ravel()
 
+    # Calculate classification performance metrics.
     classification_metrics = {
         "truth_samples": len(truth_by_sample),
         "matched_samples": len(matched),
@@ -502,72 +461,113 @@ def evaluate_model(
         "model_samples_not_in_truth": len(extra_samples),
         "accuracy": accuracy_score(y_true, y_pred),
         "balanced_accuracy": balanced_accuracy_score(y_true, y_pred),
-        "anomaly_precision": precision_score(y_true, y_pred, pos_label=-1, zero_division=0),
-        "anomaly_recall_sensitivity": recall_score(y_true, y_pred, pos_label=-1, zero_division=0),
-        "anomaly_f1": f1_score(y_true, y_pred, pos_label=-1, zero_division=0),
+        "anomaly_precision": precision_score(
+            y_true, y_pred, pos_label=-1, zero_division=0
+        ),
+        "anomaly_recall_sensitivity": recall_score(
+            y_true, y_pred, pos_label=-1, zero_division=0
+        ),
+        "anomaly_f1": f1_score(
+            y_true, y_pred, pos_label=-1, zero_division=0
+        ),
         "specificity": tn / (tn + fp) if (tn + fp) else float("nan"),
-        "false_positive_rate": fp / (fp + tn) if (fp + tn) else float("nan"),
+        "false_positive_rate": (
+            fp / (fp + tn) if (fp + tn) else float("nan")
+        ),
         "true_positives": int(tp),
         "false_positives": int(fp),
         "true_negatives": int(tn),
         "false_negatives": int(fn),
     }
+
     pd.DataFrame(
-        classification_metrics.items(), columns=["metric", "value"]
-    ).to_csv(result_dir / "classification_metrics.csv", index=False)
+        classification_metrics.items(),
+        columns=["metric", "value"],
+    ).to_csv(
+        result_dir / "classification_metrics.csv",
+        index=False,
+    )
 
     print("\nCLASSIFICATION PERFORMANCE")
     print(pd.Series(classification_metrics).to_string())
+
     print("\nCLASSIFICATION REPORT")
-    print(classification_report(
-        y_true,
-        y_pred,
-        labels=[-1, 1],
-        target_names=["Anomaly (-1)", "Normal (1)"],
-        zero_division=0,
-    ))
+    print(
+        classification_report(
+            y_true,
+            y_pred,
+            labels=[-1, 1],
+            target_names=["Anomaly (-1)", "Normal (1)"],
+            zero_division=0,
+        )
+    )
 
     # Evaluate explanation features for matched samples.
     reason_results = matched.copy()
+
     for method_name, columns in [
-        ("shap", SHAP_COLUMNS),
-        ("robust_z", ROBUST_Z_COLUMNS),
+        ("shap", config.SHAP_COLUMNS),
+        ("robust_z", config.ROBUST_Z_COLUMNS),
     ]:
         details = reason_results.apply(
-            lambda row: pd.Series(evaluate_reason_method(row, columns)),
+            lambda row: pd.Series(
+                evaluate_reason_method(row, columns)
+            ),
             axis=1,
         )
+
         for column in details.columns:
             reason_results[f"{method_name}_{column}"] = details[column]
 
-    reason_results.to_csv(result_dir / "reason_evaluation_by_sample.csv", index=False)
+    reason_results.to_csv(
+        result_dir / "reason_evaluation_by_sample.csv",
+        index=False,
+    )
 
+    # Only evaluate explanation quality for known anomalies
+    # that have at least one reference truth feature.
     valid = reason_results.loc[
         reason_results["truth_anomaly"].eq(-1)
         & reason_results["truth_features"].map(bool)
     ].copy()
 
+    # Summarise SHAP and robust Z-score explanation performance.
     summaries = []
+
     for method_name in ["shap", "robust_z"]:
         hit_col = f"{method_name}_reason_hit"
         precision_col = f"{method_name}_reason_precision"
         recall_col = f"{method_name}_reason_recall"
 
         hits = valid[hit_col].dropna().astype(bool)
+
         summaries.append({
             "method": method_name,
             "anomalous_samples_with_reference_reasons": len(valid),
             "samples_with_any_correct_reason": int(hits.sum()),
-            "reason_hit_rate": hits.mean() if len(hits) else float("nan"),
-            "mean_reason_precision": valid[precision_col].mean() if len(valid) else float("nan"),
-            "mean_reason_recall": valid[recall_col].mean() if len(valid) else float("nan"),
+            "reason_hit_rate": (
+                hits.mean() if len(hits) else float("nan")
+            ),
+            "mean_reason_precision": (
+                valid[precision_col].mean()
+                if len(valid) else float("nan")
+            ),
+            "mean_reason_recall": (
+                valid[recall_col].mean()
+                if len(valid) else float("nan")
+            ),
         })
 
     reason_summary = pd.DataFrame(summaries)
-    reason_summary.to_csv(result_dir / "reason_method_comparison.csv", index=False)
+
+    reason_summary.to_csv(
+        result_dir / "reason_method_comparison.csv",
+        index=False,
+    )
 
     print("\nREASON METHOD COMPARISON")
     print(reason_summary.to_string(index=False))
+
     print(f"\nEvaluation files saved to: {result_dir.resolve()}")
 
     return {
@@ -742,8 +742,8 @@ def graphs_for_evaluation(results: dict, assay: str, version: str, out_dir) -> N
                 counts[feature] = counts.get(feature, 0) + 1
         return pd.Series(counts, dtype=int)
 
-    shap_counts = count_predicted_reasons(reason_samples, SHAP_COLUMNS)
-    robust_counts = count_predicted_reasons(reason_samples, ROBUST_Z_COLUMNS)
+    shap_counts = count_predicted_reasons(reason_samples, config.SHAP_COLUMNS)
+    robust_counts = count_predicted_reasons(reason_samples, config.ROBUST_Z_COLUMNS)
     all_counts = pd.DataFrame({
         "Truth set": pd.Series(truth_counts, dtype=int),
         "SHAP": shap_counts,
@@ -774,14 +774,33 @@ def graphs_for_evaluation(results: dict, assay: str, version: str, out_dir) -> N
 
 if __name__ == "__main__":
     # Change assay/version to match the files being evaluated.
-    ASSAY = "st"
-    VERSION = "v2_v3"
+    parser = argparse.ArgumentParser(
+            description='Settings for training the Isolation Model'
+        )
+    
+    parser.add_argument(
+        "--assay",
+        choices=["st", "haem"],
+        required=True,
+        help='Assay to train model: "st" or "haem"'
+    )
+
+    parser.add_argument(
+        "--version",
+        choices=["v2", "v3", "v2_v3"],
+        help="Capture version to train the model: 'v2', 'v3', or 'v2_v3'"
+    )
+
+    args = parser.parse_args()
+
+    OUTPUT_DIR = os.path.join("data/evaluate", args.assay, args.version )
+
 
     results = evaluate_model(
-        scored_data=MODEL_FILE,
-        truth_file=TRUTH_FILE,
-        assay=ASSAY,
-        version=VERSION,
+        'data/trained/st/v2_v3/st_v2_v3_c0.15, n100_ms256_mf1.0_test_scored.csv',
+        truth_file=os.path.join(config.TRUTH_SET_DIR, f'truth_set_{args.assay}_500.csv'),
+        assay=args.assay,
+        version=args.version,
         out_dir=OUTPUT_DIR,
     )
-    graphs_for_evaluation(results, assay=ASSAY, version=VERSION, out_dir="outputs/graphs/evaluate/")
+    graphs_for_evaluation(results, assay=args.assay, version=args.assay, out_dir="outputs/graphs/evaluate/")
