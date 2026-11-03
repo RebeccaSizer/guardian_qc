@@ -792,12 +792,12 @@ if __name__ == "__main__":
 
     OUTPUT_DIR = os.path.join("data/evaluate")
 
-
     results = evaluate_model(
-        'data/trained/st/v2_v3/st_v2_v3_c0.15, n100_ms256_mf1.0_test_scored.csv',
+        f'data/trained/{args.assay}/{args.version}/{args.assay}_{args.version}_c0.08, n100_ms256_mf1.0_test_scored.csv',
         truth_file=os.path.join(config.TRUTH_SET_DIR, f'truth_set_{args.assay}_500.csv'),
         assay=args.assay,
         version=args.version,
         out_dir=OUTPUT_DIR,
     )
-    graphs_for_evaluation(results, assay=args.assay, version=args.assay, out_dir="outputs/graphs/evaluate/")
+    graphs_for_evaluation(results, assay=args.assay, version=args.version, out_dir=os.path.join("outputs/graphs/evaluate/", args.assay, args.version))
+

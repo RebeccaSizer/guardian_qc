@@ -108,16 +108,16 @@ COL_TO_DROP_ST = [
         ]
 
 COL_TO_DROP_HAEM = [
-            'bcftools_ts',
-            'picard_pf_reads',
-            'picard_mean_target_coverage',
             'picard_mean_insert',
+            'picard_median_insert',
+            'picard_mad_insert',
+            'picard_mean_target_coverage',
             'fastqc_basic_status_pass|pass',
             'fastqc_basic_status_pass|pass|pass|pass',
-            'bcftools_variants',
             'picard_target_bases_20x',
             'picard_target_bases_30x',
             'picard_target_bases_50x'
+            'fastp_duplication_rate'
         ]
 
 
