@@ -95,16 +95,37 @@ PREPROCESSING_OUTDIR = 'models/preprocessing/'
 PREPROCESSING_PLOT_DIR = 'outputs/graphs/preprocessing/'
 
 COL_TO_DROP_ST = [
-            'picard_mean_insert',
+            'bcftools_ts',
+            'bcftools_tv',
+            #'bcftools_tstv',
+            'bcftools_variants',
+            'bcftools_snvs',
+            'bcftools_indels',
+            'picard_mode_insert',
+            #'picard_mean_insert',
             'picard_median_insert',
             'picard_mad_insert',
+
+            'picard_total_reads',
+            'picard_pf_reads',
+            'picard_pf_q30_bases',
+            'picard_read_length',
+
+            'picard_at_dropout',
+            'picard_gc_dropout',
+            'picard_fold_enrichment',
+            #'picard_fold80',
+            'picard_median_target_coverage',
             'picard_mean_target_coverage',
-            'fastqc_basic_status_pass|pass',
-            'fastqc_basic_status_pass|pass|pass|pass',
             'picard_target_bases_20x',
             'picard_target_bases_30x',
-            'picard_target_bases_50x'
-            'fastp_duplication_rate'
+            'picard_target_bases_50x',
+            #'picard_target_bases_100x',
+
+            'fastp_duplication_rate',
+            'fastqc_duplication_rate',
+            'fastqc_basic_status_pass|pass',
+            'fastqc_basic_status_pass|pass|pass|pass',
         ]
 
 COL_TO_DROP_HAEM = [
@@ -142,6 +163,7 @@ TRAINED_OUTPUT_DATA = 'data/trained'
 # set up variables for evaluate.py
 ##################################
 
-TRUTH_SET_DIR = 'data/raw/'#
+TRUTH_SET_DIR = 'data/raw/'
 SHAP_COLUMNS = ["top_1_metric", "top_2_metric", "top_3_metric"]
 ROBUST_Z_COLUMNS = ["top_1_feature", "top_2_feature", "top_3_feature"]
+EVALUATE_OUTDIR = 'data/evaluate'
