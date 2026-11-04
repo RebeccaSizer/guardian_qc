@@ -52,10 +52,12 @@ if args.assay == 'haem':
 elif args.assay == 'st':
     contamination = 0.15
 
-explained_model_train, explained_model_test = run_model_train(X_train, X_test, train_meta, test_meta, args.assay, args.version, contamination, config.N_ESTIMATORS, config.MAX_SAMPLES, config.MAX_FEATURES, os.path.join(config.TRAINED_OUTPUT_DATA, args.assay, args.version ))
+# The default values are: contamination 0.08 for haem and 15% for st. n_estimators = 100, max_samples = 256, max_features = 1.0
+explained_model_train, explained_model_test = run_model_train(X_train, X_test, train_meta, test_meta, args.assay, args.version, contamination, config.OPT_N_ESTIMATORS, config.OPT_MAX_SAMPLES, config.OPT_MAX_FEATURES, os.path.join(config.TRAINED_OUTPUT_DATA, args.assay, args.version ))
+
 
 results = evaluate_model(
-    f'data/trained/{args.assay}/{args.version}/{args.assay}_{args.version}_c{contamination}, n100_ms256_mf1.0_test_scored.csv',
+    f'data/trained/{args.assay}/{args.version}/{args.assay}_{args.version}_c{contamination}, n{config.OPT_N_ESTIMATORS}_ms{config.OPT_MAX_SAMPLES}_mf{config.OPT_MAX_FEATURES}_test_scored.csv',
     truth_file=os.path.join(config.TRUTH_SET_DIR, f'truth_set_{args.assay}_500.csv'),
     assay=args.assay,
     version=args.version,

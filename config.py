@@ -167,3 +167,8 @@ TRUTH_SET_DIR = 'data/raw/'
 SHAP_COLUMNS = ["top_1_metric", "top_2_metric", "top_3_metric"]
 ROBUST_Z_COLUMNS = ["top_1_feature", "top_2_feature", "top_3_feature"]
 EVALUATE_OUTDIR = 'data/evaluate'
+
+OPT_N_ESTIMATORS = 100 # The number of base estimators in the ensemble (Number of decision trees) - can up to 300 if needed
+OPT_RANDOM_STATE = 42 # Controls the pseudo-randomness of the selection of the features and the split values - needed to build a reproducible random sequence
+OPT_MAX_SAMPLES = 256
+OPT_MAX_FEATURES = 0.75

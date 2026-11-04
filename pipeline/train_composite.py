@@ -744,8 +744,8 @@ def run_model_train(X_train, X_test, train_meta, test_meta, assay, version, cont
 
     # Save the full scored + metadata output for manual review
     os.makedirs(out_dir, exist_ok=True)
-    model_output_train.to_csv(os.path.join(out_dir, f"{assay}_{version}_c{contamination}, n{n_estimators}_ms{max_samples}_mf{max_features}_train_scored.csv"), index=True)
-    model_output_test.to_csv( os.path.join(out_dir, f"{assay}_{version}_c{contamination}, n{n_estimators}_ms{max_samples}_mf{max_features}_test_scored.csv"),  index=True)
+    model_output_train.to_csv(os.path.join(out_dir, f"{assay}_{version}_c{contamination}, n{config.OPT_N_ESTIMATORS}_ms{config.OPT_MAX_SAMPLES}_mf{config.OPT_MAX_FEATURES}_train_scored.csv"), index=True)
+    model_output_test.to_csv( os.path.join(out_dir, f"{assay}_{version}_c{contamination}, n{config.OPT_N_ESTIMATORS}_ms{config.OPT_MAX_SAMPLES}_mf{config.OPT_MAX_FEATURES}_test_scored.csv"),  index=True)
     logging.info(f"[{assay}] Scored outputs with metadata saved to {out_dir}")
 
     logging.info(f"Training complete. model_output_train: {model_output_train.shape}")
@@ -794,4 +794,4 @@ if __name__ == "__main__":
     X_train, X_test, train_meta, test_meta = run_preprocessing(config.SUMMARY_QC_METRICS, args.assay, out_dir=None, version=args.version)
 
     # The default values are: contamination 0.08 for haem and 15% for st. n_estimators = 100, max_samples = 256, max_features = 1.0
-    explained_model_train, explained_model_test = run_model_train(X_train, X_test, train_meta, test_meta, args.assay, args.version, contamination, config.N_ESTIMATORS, config.MAX_SAMPLES, config.MAX_FEATURES, os.path.join(config.TRAINED_OUTPUT_DATA, args.assay, args.version ))
+    explained_model_train, explained_model_test = run_model_train(X_train, X_test, train_meta, test_meta, args.assay, args.version, contamination, config.OPT_N_ESTIMATORS, config.OPT_MAX_SAMPLES, config.OPT_MAX_FEATURES, os.path.join(config.TRAINED_OUTPUT_DATA, args.assay, args.version ))

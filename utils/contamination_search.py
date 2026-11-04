@@ -389,7 +389,7 @@ def parameter_tuning(metric, summary_qc_metrics: str, assay: str, version: str, 
 
         "n_estimators": [50, 100, 150, 200, 250, 300],
 
-        "max_samples": [0.5, 0.75, 1.0],
+        "max_samples": [256, 512, 1024],
 
         "max_features": [0.5, 0.75, 1.0]
     }
@@ -430,7 +430,7 @@ def parameter_tuning(metric, summary_qc_metrics: str, assay: str, version: str, 
 
     results_df = pd.DataFrame(all_results)
     
-    results_df.to_csv(os.path.join("outputs/evaluation/", f"{assay}_{version}.csv"))
+    results_df.to_csv(os.path.join("outputs/evaluation/", f"{assay}_{version}_{metric}.csv"))
 
     plot_parameter_results(
         metric,
