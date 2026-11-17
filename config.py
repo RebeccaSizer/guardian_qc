@@ -40,8 +40,135 @@ SAMPLE_SHEET_PATTERN = re.compile(r"^SampleSheet\.csv$")
 QC_FILE_PATHS = "data/raw/qc_summary_file_paths.csv"
 
 # Set output file location for files that pass run-level QC filtering and have all information for downstream analysis
-FILTERED_RUN_QC_DATA = "data/processed/filtered_by_run_metrics(1).csv"
+FILTERED_RUN_QC_DATA = "data/preprocessed/filtered_by_run_metrics(1).tsv"
 
 # Set file path to summary_qc_metrics.csv file
-SUMMARY_QC_METRICS = "data/processed/summary_qc_metrics(2).csv"
+SUMMARY_QC_METRICS = "data/preprocessed/summary_qc_metrics(2).tsv"
 
+# Path to plots 
+INGEST_PLOT_DIR = "outputs/graphs/ingest"
+#########################################
+# Set up variables for preprocessing.py
+#########################################
+
+
+SUMMARY_QC_METRICS_CLEANED = "data/preprocessed/cleaned_summary_qc_metrics(3).tsv"
+
+# Set variables for preprocessing 
+# Define the model features 
+MODEL_FEATURES = [
+    "bcftools_ts",
+    "bcftools_tv",
+    "bcftools_tstv",
+    "bcftools_variants",
+    "bcftools_snvs",
+    "bcftools_indels",
+    "picard_mode_insert",
+    "picard_mean_insert",
+    "picard_median_insert",
+    "picard_mad_insert",
+    "picard_total_reads",
+    "picard_pf_reads",
+    "picard_pf_q30_bases",
+    "picard_read_length",
+    "picard_at_dropout",
+    "picard_gc_dropout",
+    "picard_fold_enrichment",
+    "picard_fold80",
+    "picard_mean_target_coverage",
+    "picard_median_target_coverage",
+    "picard_target_bases_20x",
+    "picard_target_bases_30x",
+    "picard_target_bases_50x",
+    "picard_target_bases_100x",
+    "fastqc_duplication_rate",
+    "fastp_duplication_rate"
+]
+
+CATERGORICAL_COLUMNS = ['fastqc_basic_status']
+METADATA_COLUMNS = ["sample_name", "cancer_type", "sequencer", "assay_type", "worklist"]
+STRATIFY_COLUMNS = ['cancer_type', 'sequencer', 'assay_type']
+
+# Set output directory for preprocessing files 
+PREPROCESSING_OUTDIR = 'models/preprocessing/'
+#UNSUPERVISED_MODELS_DIR = 'models/unsupervised/'
+PREPROCESSING_PLOT_DIR = 'outputs/graphs/preprocessing/'
+
+COL_TO_DROP_ST = [
+            'bcftools_ts',
+            'bcftools_tv',
+            #'bcftools_tstv',
+            'bcftools_variants',
+            'bcftools_snvs',
+            'bcftools_indels',
+            'picard_mode_insert',
+            #'picard_mean_insert',
+            'picard_median_insert',
+            'picard_mad_insert',
+
+            'picard_total_reads',
+            'picard_pf_reads',
+            'picard_pf_q30_bases',
+            'picard_read_length',
+
+            'picard_at_dropout',
+            'picard_gc_dropout',
+            'picard_fold_enrichment',
+            #'picard_fold80',
+            'picard_median_target_coverage',
+            'picard_mean_target_coverage',
+            'picard_target_bases_20x',
+            'picard_target_bases_30x',
+            'picard_target_bases_50x',
+            #'picard_target_bases_100x',
+
+            'fastp_duplication_rate',
+            'fastqc_duplication_rate',
+            'fastqc_basic_status_pass|pass',
+            'fastqc_basic_status_pass|pass|pass|pass',
+        ]
+
+COL_TO_DROP_HAEM = [
+            'picard_mean_insert',
+            'picard_median_insert',
+            'picard_mad_insert',
+            'picard_mean_target_coverage',
+            'fastqc_basic_status_pass|pass',
+            'fastqc_basic_status_pass|pass|pass|pass',
+            'picard_target_bases_20x',
+            'picard_target_bases_30x',
+            'picard_target_bases_50x'
+            'fastp_duplication_rate'
+        ]
+
+
+#################################
+# set up variables for train_n.py
+#################################
+
+N_ESTIMATORS = 100 # The number of base estimators in the ensemble (Number of decision trees) - can up to 300 if needed
+RANDOM_STATE = 42 # Controls the pseudo-randomness of the selection of the features and the split values - needed to build a reproducible random sequence
+MAX_SAMPLES = 256
+MAX_FEATURES = 1.0
+ 
+# Top features to report
+TOP_N_FEATURES = 3
+
+# Output directory for models 
+TRAINED_COMPOSITE_MODEL_OUTDIR = 'models/trained/composite'
+TRAINING_PLOT_DIR = 'outputs/graphs/train'
+TRAINED_OUTPUT_DATA = 'data/trained'
+
+#################################
+# set up variables for evaluate.py
+##################################
+
+TRUTH_SET_DIR = 'data/raw/'
+SHAP_COLUMNS = ["top_1_metric", "top_2_metric", "top_3_metric"]
+ROBUST_Z_COLUMNS = ["top_1_feature", "top_2_feature", "top_3_feature"]
+EVALUATE_OUTDIR = 'data/evaluate'
+
+OPT_N_ESTIMATORS = 100 # The number of base estimators in the ensemble (Number of decision trees) - can up to 300 if needed
+OPT_RANDOM_STATE = 42 # Controls the pseudo-randomness of the selection of the features and the split values - needed to build a reproducible random sequence
+OPT_MAX_SAMPLES = 256
+OPT_MAX_FEATURES = 0.75

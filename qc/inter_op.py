@@ -30,7 +30,7 @@ def inter_op_qc(run_path):
     """
     
     # get full path for run folder
-    logger.info(f"Accessing run forlder data at path : {run_path}")
+    logger.info(f"Accessing run folder data at path : {run_path}")
 
     # Load InterOp
     run_metrics = py_interop_run_metrics.run_metrics()

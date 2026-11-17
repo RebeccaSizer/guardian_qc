@@ -218,3 +218,4 @@ __marimo__/
 *.png
 *.log*
 data/
+*.pkl
