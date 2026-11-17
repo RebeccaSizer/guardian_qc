@@ -414,10 +414,10 @@ def parameter_tuning(metric, summary_qc_metrics: str, assay: str, version: str, 
 
         explained_model_train, explained_model_test = run_model_train(X_train, X_test, train_meta, test_meta, assay, version, params['contamination'], params['n_estimators'], params['max_samples'], params['max_features'], os.path.join('models/trained/composite', assay))
 
-        scored_explained = explained_model_test.copy()
+        scored_explained_training = explained_model_test.copy()
 
         returned_analysis = quality_metric_flag_success_all(
-            scored=scored_explained,
+            scored=scored_explained_training,
             truth_set=truth_df,
             assay=assay,
             version=version,

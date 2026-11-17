@@ -98,11 +98,12 @@ COL_TO_DROP_ST = [
             'bcftools_ts',
             'bcftools_tv',
             #'bcftools_tstv',
+
             'bcftools_variants',
             'bcftools_snvs',
             'bcftools_indels',
-            'picard_mode_insert',
-            #'picard_mean_insert',
+            #'picard_mode_insert',
+            'picard_mean_insert',
             'picard_median_insert',
             'picard_mad_insert',
 
@@ -129,16 +130,39 @@ COL_TO_DROP_ST = [
         ]
 
 COL_TO_DROP_HAEM = [
+            'bcftools_ts',
+            'bcftools_tv',
+            #'bcftools_tstv',
+
+            'bcftools_variants',
+            'bcftools_snvs',
+            'bcftools_indels',
+
+            #'picard_mode_insert',
             'picard_mean_insert',
             'picard_median_insert',
             'picard_mad_insert',
+
+            'picard_total_reads',
+            'picard_pf_reads',
+            'picard_pf_q30_bases',
+            'picard_read_length',
+
+            #'picard_at_dropout',
+            'picard_gc_dropout',
+            'picard_fold_enrichment',
+            #'picard_fold80',
+            #'picard_median_target_coverage',
             'picard_mean_target_coverage',
-            'fastqc_basic_status_pass|pass',
-            'fastqc_basic_status_pass|pass|pass|pass',
             'picard_target_bases_20x',
             'picard_target_bases_30x',
-            'picard_target_bases_50x'
-            'fastp_duplication_rate'
+            'picard_target_bases_50x',
+            'picard_target_bases_100x',
+
+            'fastp_duplication_rate',
+            'fastqc_duplication_rate',
+            'fastqc_basic_status_pass|pass',
+            'fastqc_basic_status_pass|pass|pass|pass',
         ]
 
 
@@ -146,10 +170,10 @@ COL_TO_DROP_HAEM = [
 # set up variables for train_n.py
 #################################
 
-N_ESTIMATORS = 100 # The number of base estimators in the ensemble (Number of decision trees) - can up to 300 if needed
+N_ESTIMATORS = 50 # The number of base estimators in the ensemble (Number of decision trees) - can up to 300 if needed
 RANDOM_STATE = 42 # Controls the pseudo-randomness of the selection of the features and the split values - needed to build a reproducible random sequence
-MAX_SAMPLES = 256
-MAX_FEATURES = 1.0
+MAX_SAMPLES = 512
+MAX_FEATURES = 0.75
  
 # Top features to report
 TOP_N_FEATURES = 3
@@ -168,7 +192,7 @@ SHAP_COLUMNS = ["top_1_metric", "top_2_metric", "top_3_metric"]
 ROBUST_Z_COLUMNS = ["top_1_feature", "top_2_feature", "top_3_feature"]
 EVALUATE_OUTDIR = 'data/evaluate'
 
-OPT_N_ESTIMATORS = 100 # The number of base estimators in the ensemble (Number of decision trees) - can up to 300 if needed
+OPT_N_ESTIMATORS = 50 # ST 100, Haem 50
 OPT_RANDOM_STATE = 42 # Controls the pseudo-randomness of the selection of the features and the split values - needed to build a reproducible random sequence
-OPT_MAX_SAMPLES = 256
+OPT_MAX_SAMPLES = 512 #ST:256 Haem: 512
 OPT_MAX_FEATURES = 0.75
