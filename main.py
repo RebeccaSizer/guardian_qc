@@ -40,7 +40,8 @@ X_train, X_test, train_meta, test_meta = run_preprocessing(
         file_path=config.SUMMARY_QC_METRICS,
         assay=args.assay,
         version=args.version,
-        out_dir=os.path.join(
+        out_dir_file='data',
+        out_dir_model=os.path.join(
             config.PREPROCESSING_OUTDIR,
             args.assay
         ),

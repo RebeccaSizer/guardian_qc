@@ -9,7 +9,7 @@ such as data ingestion, error handling, and data validation.
 from asyncio import run
 import re
 from unittest.mock import patch
-
+import numpy as np
 import config
 from pipeline.ingest import (get_qc_summary_file_path, 
                             get_run_file_paths, 
@@ -20,9 +20,6 @@ from pipeline.ingest import (get_qc_summary_file_path,
 import pytest
 import pandas as pd
 from pathlib import Path
-
-Path("data/raw").mkdir(parents=True, exist_ok=True)
-Path("data/processed").mkdir(parents=True, exist_ok=True)
 
 ###############################
 # Test Ingest Functions       #  
@@ -152,7 +149,7 @@ def test_get_run_file_paths(tmp_path, monkeypatch):
 # merge_run_and_qc_data 
 ###############################
 
-def test_get_run_sample_file_paths():
+def test_get_run_sample_file_paths(tmp_path):
     """
     Test the merge_run_and_qc_data function to ensure it returns 
     the correct DataFrame structure and expected columns.
@@ -414,3 +411,166 @@ def test_sample_level_qc(tmp_path):
     assert len(result) == 1
     assert result.loc[0, "sample_name"] == "Sample001"
     assert result.loc[0, "sequencer"] == "NovaSeq6000"
+
+# Test graph functions 
+import pipeline.ingest as ingest
+
+@pytest.fixture
+def test_ingest_data():
+
+    np.random.seed(42)
+
+    n = 30
+
+    df = pd.DataFrame({
+        "pass_run_qc": (
+            ["Yes"] * 20
+            + ["Percent Q30 < 80 AND Error rate > 2"] * 5
+            + ["Error rate > 2"] * 5
+        ),
+
+        "assay_type": (
+            ["haem"] * 10
+            + ["solid_tumour"] * 10
+            + ["haem"] * 10
+        ),
+
+        "sequencer": (
+            ["novaseq6000"] * 10
+            + ["novaseqx"] * 10
+            + ["novaseq6000"] * 10
+        ),
+
+        "cancer_type": (
+            ["breast"] * 10
+            + ["lung"] * 10
+            + ["breast"] * 10
+        ),
+
+        "metric_a": np.random.normal(100, 10, n),
+        "metric_b": np.random.normal(50, 5, n),
+        "metric_c": np.random.normal(200, 20, n)
+    })
+
+    return df
+
+def test_pie_chart_run_metric_pass_rate(
+    test_ingest_data, tmp_path, monkeypatch
+):
+
+    monkeypatch.setattr(
+        ingest.config,
+        "INGEST_PLOT_DIR",
+        str(tmp_path)
+    )
+
+    ingest.pie_chart_run_metric_pass_rate(test_ingest_data)
+
+    output_file = tmp_path / "pie_chart_pass_run_qc.png"
+
+    assert output_file.exists()
+    assert output_file.stat().st_size > 0
+
+
+def test_bar_chart_sample_count_by_sequencer_and_cancer_type(
+    test_ingest_data, tmp_path, monkeypatch
+):
+
+    monkeypatch.setattr(
+        ingest.config,
+        "INGEST_PLOT_DIR",
+        str(tmp_path)
+    )
+
+    ingest.bar_chart_sample_count_by_sequencer_and_cancer_type(
+        test_ingest_data
+    )
+
+    output_file = (
+        tmp_path /
+        "sample_count_by_cancer_type_and_sequencer.png"
+    )
+
+    assert output_file.exists()
+    assert output_file.stat().st_size > 0
+
+
+def test_comparing_sequencer_cancer_type(
+    test_ingest_data, tmp_path, monkeypatch
+):
+
+    monkeypatch.setattr(
+        ingest.config,
+        "INGEST_PLOT_DIR",
+        str(tmp_path)
+    )
+
+    monkeypatch.setattr(
+        ingest,
+        "metric_cols",
+        ["metric_a", "metric_b", "metric_c"]
+    )
+
+    ingest.comparing_sequencer_cancer_type(test_ingest_data)
+
+    output_file = tmp_path / "pca_by_group.png"
+
+    assert output_file.exists()
+    assert output_file.stat().st_size > 0
+
+
+def test_group_differences(test_ingest_data):
+
+    results = ingest.test_group_differences(
+        test_ingest_data,
+        cols=["metric_a", "metric_b", "metric_c"],
+        group_col="cancer_type"
+    )
+
+    # Check output type
+    assert isinstance(results, pd.DataFrame)
+
+    # Check expected columns
+    expected_columns = [
+        "metric",
+        "statistic",
+        "p_value",
+        "p_value_corrected",
+        "significant"
+    ]
+
+    assert list(results.columns) == expected_columns
+
+    # Check all three metrics were tested
+    assert set(results["metric"]) == {
+        "metric_a",
+        "metric_b",
+        "metric_c"
+    }
+
+    # Check p-values are valid
+    assert results["p_value"].between(0, 1).all()
+    assert results["p_value_corrected"].between(0, 1).all()
+
+    # Check significant column is Boolean
+    assert results["significant"].dtype == bool
+
+    # Check results are sorted by corrected p-value
+    assert results["p_value_corrected"].is_monotonic_increasing
+
+
+def test_group_differences_insufficient_samples():
+
+    df = pd.DataFrame({
+        "group": ["A", "B"],
+        "metric_a": [10, 20]
+    })
+
+    results = ingest.test_group_differences(
+        df,
+        cols=["metric_a"],
+        group_col="group"
+    )
+
+    assert isinstance(results, pd.DataFrame)
+    assert results.empty

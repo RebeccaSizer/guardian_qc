@@ -407,8 +407,6 @@ def get_run_sample_file_paths(df_run_metrics, df_sample_metrics):
         df_merged["file_status"] = df_merged.apply(
             check_both_files_present, 
             axis = 1)
-        
-        df_merged.to_csv(config.QC_FILE_PATHS, sep='\t', header=True, index=False)
 
         counts = (
             df_merged.groupby(["sequencer", "cancer_type"])
@@ -722,8 +720,15 @@ def pie_chart_run_metric_pass_rate(df):
     plt.tight_layout()
 
     # Save figure
-    plt.show()
-    plt.savefig(os.path.join(config.INGEST_PLOT_DIR, 'pie_chart_pass_run_qc.png'))
+    output_dir = Path(config.INGEST_PLOT_DIR)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    fig.savefig(
+        output_dir / 'pie_chart_pass_run_qc.png',
+        bbox_inches="tight"
+    )
+
+    plt.close(fig)
 
 
 def bar_chart_sample_count_by_sequencer_and_cancer_type(df):
@@ -735,17 +740,24 @@ def bar_chart_sample_count_by_sequencer_and_cancer_type(df):
 
     fig, ax = plt.subplots(figsize=(8, 6))
 
-    plt.figure(figsize=(8, 6))
-    plt.bar(counts["label"], counts["count"])
+    ax.bar(counts["label"], counts["count"])
 
-    plt.xlabel("Sequencer / Cancer Type")
-    plt.ylabel("Number of Samples")
-    plt.title("Samples by Sequencer and Cancer Type")
-    plt.xticks(rotation=45, ha="right")
+    ax.set_xlabel("Sequencer / Cancer Type")
+    ax.set_ylabel("Number of Samples")
+    ax.set_title("Samples by Sequencer and Cancer Type")
+    ax.tick_params(axis="x", rotation=45)
 
-    plt.tight_layout()
-    plt.savefig(os.path.join(config.INGEST_PLOT_DIR, 'sample_count_by_cancer_type_and_sequencer.png'))
+    fig.tight_layout()
 
+    output_dir = Path(config.INGEST_PLOT_DIR)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    fig.savefig(
+        output_dir / 'sample_count_by_cancer_type_and_sequencer.png',
+        bbox_inches="tight"
+    )
+
+    plt.close(fig)
 
 def comparing_sequencer_cancer_type(df):
 
@@ -809,8 +821,17 @@ def comparing_sequencer_cancer_type(df):
                 bbox_to_anchor=(1.05, 1), loc='upper left')
 
     plt.tight_layout()
-    plt.savefig(os.path.join(config.INGEST_PLOT_DIR, "pca_by_group.png"), dpi=150, bbox_inches="tight")
+    
+    output_dir = Path(config.INGEST_PLOT_DIR)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
+    fig.savefig(
+        output_dir / "pca_by_group.png",
+        dpi=150,
+        bbox_inches="tight"
+    )
+
+    plt.close(fig)
 
 def test_group_differences(df, cols, group_col):
     """
@@ -822,7 +843,7 @@ def test_group_differences(df, cols, group_col):
 
     results = []
 
-    for metric in metric_cols:
+    for metric in cols:
         groups = [
             group[metric].dropna()
             for _, group in df.groupby(group_col)
@@ -860,7 +881,7 @@ def test_group_differences(df, cols, group_col):
 
 ###################################################
 # Ingest data using above functions
-def ingest_data():
+def ingest_data(out_dir):
     """
     This function produces a dataframe containing all of the sample level quality metrics
     pulled from any run which passed run level qc. Metrics pulled through include:
@@ -910,7 +931,7 @@ def ingest_data():
     df_run = get_run_file_paths()
 
     df = get_run_sample_file_paths(df_run, df_sample)
-    df.to_csv(config.QC_FILE_PATHS, sep="\t", index=False)
+    df.to_csv(os.path.join(out_dir, config.QC_FILE_PATHS), sep="\t", index=False)
 
     # Filter the data
     df = filter_df(df)
@@ -918,14 +939,14 @@ def ingest_data():
     df = filter_run_qc(df)
     pie_chart_run_metric_pass_rate(df)
 
-    df.to_csv(config.FILTERED_RUN_QC_DATA, sep="\t", index=False)
+    df.to_csv(os.path.join(out_dir, config.FILTERED_RUN_QC_DATA), sep="\t", index=False)
 
     # Extract summary QC metrics
     summary_qc_metrics_df = sample_level_qc(df)
     bar_chart_sample_count_by_sequencer_and_cancer_type(summary_qc_metrics_df)
     comparing_sequencer_cancer_type(summary_qc_metrics_df)
 
-    summary_qc_metrics_df.to_csv(config.SUMMARY_QC_METRICS, sep = "\t", index = False)
+    summary_qc_metrics_df.to_csv(os.path.join(out_dir, config.SUMMARY_QC_METRICS), sep = "\t", index = False)
 
     logging.info(
             f"Summary QC metrics written to "
@@ -936,10 +957,10 @@ def ingest_data():
     return summary_qc_metrics_df
 
 
-if __name__ == "__main__":
+if __name__ == "__main__": # pragma: no cover
 
     # Ingest the data 
-    df = ingest_data()
+    df = ingest_data("data")
 
     # Create a copy to create graphs
     df_metrics = df.copy()

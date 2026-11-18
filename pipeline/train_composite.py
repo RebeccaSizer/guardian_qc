@@ -551,12 +551,16 @@ def plot_anomaly_score(X_scored, assay, version):
 
     output_path = os.path.join(config.TRAINING_PLOT_DIR, assay, version,
         f"anomaly_score_scatter_{assay}_{version}.png")
-    
 
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    
     plt.savefig(output_path, bbox_inches="tight")
     plt.close()
 
 def plot_shap(X_scored, model, features, assay, version, out_dir):
+
+    output_dir = os.path.join(out_dir, assay, version)
+    os.makedirs(output_dir, exist_ok=True)
 
     explainer = shap.TreeExplainer(model)
     X_explain_global = X_scored[features]
@@ -590,7 +594,7 @@ def plot_shap(X_scored, model, features, assay, version, out_dir):
     sns.heatmap(df, cmap="coolwarm", annot=True)
     plt.yticks(rotation=0)
     plt.savefig(
-            os.path.join(out_dir, assay, version, "shap_interactions.png"),
+            os.path.join(output_dir, "shap_interactions.png"),
             bbox_inches="tight",
             dpi=300
         )
@@ -599,14 +603,14 @@ def plot_shap(X_scored, model, features, assay, version, out_dir):
     # Plot graphs
     shap.plots.waterfall(shap_outliers[1]) # f(x) = average path length across all branches
     plt.savefig(
-        os.path.join(out_dir, assay, version, "shap_waterfall_sample_outlier.png"),
+        os.path.join(output_dir, "shap_waterfall_sample_outlier.png"),
         bbox_inches="tight",
         dpi=300
     )
     plt.close()
     shap.plots.waterfall(shap_normal[1])
     plt.savefig(
-        os.path.join(out_dir, assay, version, "shap_waterfall_sample_normal.png"),
+        os.path.join(output_dir, "shap_waterfall_sample_normal.png"),
         bbox_inches="tight",
         dpi=300
     )
@@ -614,7 +618,7 @@ def plot_shap(X_scored, model, features, assay, version, out_dir):
     # Outliers
     shap.plots.bar(shap_outliers, show=False)
     plt.savefig(
-        os.path.join(out_dir, assay, version, "shap_bar_outliers.png"),
+        os.path.join(output_dir, "shap_bar_outliers.png"),
         bbox_inches="tight",
         dpi=300
     )
@@ -623,7 +627,7 @@ def plot_shap(X_scored, model, features, assay, version, out_dir):
     # Normal
     shap.plots.bar(shap_normal, show=False)
     plt.savefig(
-        os.path.join(out_dir, assay, version, "shap_bar_normal.png"),
+        os.path.join(output_dir, "shap_bar_normal.png"),
         bbox_inches="tight",
         dpi=300
     )
@@ -631,7 +635,7 @@ def plot_shap(X_scored, model, features, assay, version, out_dir):
   
     shap.plots.beeswarm(shap_outliers, show=False)
     plt.savefig(
-        os.path.join(out_dir, assay, version, "shap_beeswarm_outliers.png"),
+        os.path.join(output_dir, "shap_beeswarm_outliers.png"),
         bbox_inches="tight",
         dpi=300
     )
@@ -639,7 +643,7 @@ def plot_shap(X_scored, model, features, assay, version, out_dir):
 
     shap.plots.beeswarm(shap_normal, show=False)
     plt.savefig(
-        os.path.join(out_dir, assay, version, "shap_beeswarm_normal.png"),
+        os.path.join(output_dir, "shap_beeswarm_normal.png"),
         bbox_inches="tight",
         dpi=300
     )
@@ -649,7 +653,7 @@ def plot_shap(X_scored, model, features, assay, version, out_dir):
     plt.boxplot([path_length_anomalies, path_length_normal], tick_labels=['Outlier', 'Normal'])
     plt.ylabel('Average Path Length f(x)')
     plt.savefig(
-            os.path.join(out_dir, assay, version, "average_path_length_comparison.png"),
+            os.path.join(output_dir, "average_path_length_comparison.png"),
             bbox_inches="tight",
             dpi=300
         )
@@ -744,8 +748,8 @@ def run_model_train(X_train, X_test, train_meta, test_meta, assay, version, cont
 
     # Save the full scored + metadata output for manual review
     os.makedirs(out_dir, exist_ok=True)
-    model_output_train.to_csv(os.path.join(out_dir, f"{assay}_{version}_c{contamination}, n{config.OPT_N_ESTIMATORS}_ms{config.OPT_MAX_SAMPLES}_mf{config.OPT_MAX_FEATURES}_train_scored.csv"), index=True)
-    model_output_test.to_csv( os.path.join(out_dir, f"{assay}_{version}_c{contamination}, n{config.OPT_N_ESTIMATORS}_ms{config.OPT_MAX_SAMPLES}_mf{config.OPT_MAX_FEATURES}_test_scored.csv"),  index=True)
+    model_output_train.to_csv(os.path.join(out_dir, f"{assay}_{version}_c{contamination}_n{n_estimators}_ms{max_samples}_mf{max_features}_train_scored.csv"), index=True)
+    model_output_test.to_csv( os.path.join(out_dir, f"{assay}_{version}_c{contamination}_n{n_estimators}_ms{max_samples}_mf{max_features}_test_scored.csv"),  index=True)
     logging.info(f"[{assay}] Scored outputs with metadata saved to {out_dir}")
 
     logging.info(f"Training complete. model_output_train: {model_output_train.shape}")
@@ -755,7 +759,7 @@ def run_model_train(X_train, X_test, train_meta, test_meta, assay, version, cont
  
 # ── Entry point ───────────────────────────────────────────────────────────────
  
-if __name__ == "__main__":
+if __name__ == "__main__": # pragma: no cover
 
     parser = argparse.ArgumentParser(
         description='Settings for training the Isolation Model'
@@ -781,17 +785,15 @@ if __name__ == "__main__":
     )
 
     args = parser.parse_args()
-    out_dir = os.path.join(config.PREPROCESSING_OUTDIR,
-                           args.assay
-                           )
 
-    if args.assay == 'haem':
-        contamination = 0.08
+    X_train, X_test, train_meta, test_meta = run_preprocessing(config.SUMMARY_QC_METRICS, args.assay, out_dir_file='data', out_dir_model=os.path.join(config.PREPROCESSING_OUTDIR, args.assay), version=args.version)
+    
+    if args.assay == 'st':
+         # The default values are: contamination 0.08 for haem and 15% for st. n_estimators = 100, max_samples = 256, max_features = 1.0
+        explained_model_train, explained_model_test = run_model_train(X_train, X_test, train_meta, test_meta, args.assay, args.version, config.ST_CONCENTRATION, config.ST_N_ESTIMATORS, config.ST_MAX_SAMPLES, config.ST_MAX_FEATURES, os.path.join(config.TRAINED_OUTPUT_DATA, args.assay, args.version ))
 
-    elif args.assay == 'st':
-        contamination = 0.15
+    elif args.assay == 'haem':
+        explained_model_train, explained_model_test = run_model_train(X_train, X_test, train_meta, test_meta, args.assay, args.version, config.HAEM_CONCENTRATION, config.HAEM_N_ESTIMATORS, config.HAEM_MAX_SAMPLES, config.HAEM_MAX_FEATURES, os.path.join(config.TRAINED_OUTPUT_DATA, args.assay, args.version ))
 
-    X_train, X_test, train_meta, test_meta = run_preprocessing(config.SUMMARY_QC_METRICS, args.assay, out_dir=None, version=args.version)
 
-    # The default values are: contamination 0.08 for haem and 15% for st. n_estimators = 100, max_samples = 256, max_features = 1.0
-    explained_model_train, explained_model_test = run_model_train(X_train, X_test, train_meta, test_meta, args.assay, args.version, contamination, config.OPT_N_ESTIMATORS, config.OPT_MAX_SAMPLES, config.OPT_MAX_FEATURES, os.path.join(config.TRAINED_OUTPUT_DATA, args.assay, args.version ))
+   

@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 import pytest
 import config
+import os
 
 from pipeline.preprocess import (
     load_data,
@@ -67,10 +68,24 @@ def test_fix_data_types():
     assert pd.api.types.is_float_dtype(
         result["picard_fold80"]
     )
-    assert pd.isna(result.loc[1, "picard_fold80"])
     assert result.loc[0, "picard_fold80"] == pytest.approx(1.794)
     assert result.loc[0, "sequencer"] == "novaseqx"
     assert result.loc[2, "sequencer"] == "novaseq6000"
+
+def test_separate_data_by_assay():
+
+    df = pd.DataFrame({
+        "sample_name": ["A", "B", "C", "D"],
+        "assay_type": ["novaseqx_solid_tumour_v2", "novaseqx_haem_v2", "novaseq6000_solid_tumour_v3", "novaseq6000_haem_v3"],
+        "value": [1, 2, 3, 4]
+    })
+
+    result = df[df["assay_type"].str.contains("haem")]
+
+    assert len(result) == 2
+    assert set(result["sample_name"]) == {"B", "D"}
+
+
 
 # create the test
 def create_test_qc_data(n_per_group=10):
@@ -182,33 +197,20 @@ def create_test_feature_data(n=20):
 
     return pd.DataFrame(data)
 
-def test_imputer():
+def test_imputer_removes_missing_values():
 
     train = create_test_feature_data()
-
-    imputer = fit_imputer(train)
-
-    result = apply_imputer(train, imputer)
-
-    assert not result.isna().any().any()
-    assert result.loc[1, "feature_b"] == 20.0
-
-def test_imputer():
-
-    train = create_test_feature_data()
-
     train.loc[0, "picard_fold80"] = np.nan
 
     imputer = fit_imputer(train)
-
     result = apply_imputer(train, imputer)
 
     assert not result.isna().any().any()
 
-def test_imputer():
+
+def test_imputer_uses_training_median():
 
     train = create_test_feature_data()
-
     train.loc[0, "picard_fold80"] = np.nan
 
     expected_median = train["picard_fold80"].median()
@@ -217,7 +219,6 @@ def test_imputer():
     result = apply_imputer(train, imputer)
 
     assert result.loc[0, "picard_fold80"] == expected_median
-
 
 # Test the standardScaler
 def test_standard_scaler():
@@ -234,20 +235,6 @@ def test_standard_scaler():
         assert result[column].mean() == pytest.approx(0.0)
         assert result[column].std(ddof=0) == pytest.approx(1.0)
 
-
-def test_standard_scaler():
-
-    train = create_test_feature_data()
-
-    scaler = fit_standard_scaler(train)
-
-    result = apply_standard_scaler(train, scaler)
-
-    assert result.shape == train.shape
-
-    for column in result.columns:
-        assert result[column].mean() == pytest.approx(0.0)
-        assert result[column].std(ddof=0) == pytest.approx(1.0)
 
 def test_scaler_is_fitted_on_training_data_only():
 
@@ -320,7 +307,10 @@ def test_find_correlated_features_threshold():
 def test_run_preprocessing(tmp_path):
 
     input_file = tmp_path / "input.tsv"
-    output_dir = tmp_path / "output"
+    output_dir_model = tmp_path / "output_model"
+    output_dir_model.mkdir(parents=True, exist_ok=True)
+    output_dir_file = tmp_path / "output_file"
+    output_dir_file.mkdir(parents=True, exist_ok=True)
 
     # Create realistic test data
     df = create_test_qc_data()
@@ -337,7 +327,8 @@ def test_run_preprocessing(tmp_path):
         file_path=input_file,
         assay='haem',
         version='v2',
-        out_dir=str(output_dir),
+        out_dir_file=str(output_dir_file),
+        out_dir_model=str(output_dir_model)
     )
 
     # Check that outputs are DataFrames
@@ -360,6 +351,116 @@ def test_run_preprocessing(tmp_path):
     assert np.isfinite(X_test.values).all()
 
     # Check that transformers were saved
-    assert (output_dir / "ohe.pkl").exists()
-    assert (output_dir / "imputer.pkl").exists()
-    assert (output_dir / "scaler.pkl").exists()
+    assert (output_dir_model / f"haem_v2_ohe.pkl").exists()
+    assert (output_dir_model / f"haem_v2_imputer.pkl").exists()
+    assert (output_dir_model / f"haem_v2_scaler.pkl").exists()
+
+
+# Test the graph functions
+
+from pathlib import Path
+from pipeline.preprocess import (
+    plot_correlation_matrix,
+    plot_feature_distributions
+)
+
+def test_plot_correlation_matrix(tmp_path):
+
+    X_train = pd.DataFrame({
+        "feature_a": [1, 2, 3, 4, 5],
+        "feature_b": [2, 4, 6, 8, 10],
+        "feature_c": [5, 3, 4, 2, 1]
+    })
+
+    plot_correlation_matrix(
+        X_train,
+        assay="haem_v2",
+        out_dir=tmp_path
+    )
+
+    output_file = tmp_path / "correlation_matrix_haem_v2.png"
+
+    assert output_file.exists()
+    assert output_file.stat().st_size > 0
+
+def test_plot_feature_distributions(tmp_path):
+
+    df = pd.DataFrame({
+        "assay": ["haem", "haem", "ST", "ST"],
+        "feature_a": [1, 2, 3, 4],
+        "feature_b": [5, 6, 7, 8]
+    })
+
+    features = ["feature_a", "feature_b"]
+
+    plot_feature_distributions(
+        df,
+        features,
+        assay_col="assay",
+        out_dir=tmp_path
+    )
+
+    for feature in features:
+
+        output_file = tmp_path / f"dist_{feature}.png"
+
+        assert output_file.exists()
+        assert output_file.stat().st_size > 0
+
+def test_plot_feature_distributions_missing_values(tmp_path):
+
+    df = pd.DataFrame({
+        "assay": ["haem", "haem", "ST", "ST"],
+        "feature_a": ["1.5", "?", "3.5", "4.5"]
+    })
+
+    plot_feature_distributions(
+        df,
+        features=["feature_a"],
+        assay_col="assay",
+        out_dir=tmp_path
+    )
+
+    output_file = tmp_path / "dist_feature_a.png"
+
+    assert output_file.exists()
+    assert output_file.stat().st_size > 0
+
+
+def test_plot_feature_distributions_empty_data(tmp_path):
+
+    df = pd.DataFrame({
+        "assay": ["haem", "ST", "haem"],
+        "feature_a": ["?", "?", "?"]
+    })
+
+    plot_feature_distributions(
+        df,
+        features=["feature_a"],
+        assay_col="assay",
+        out_dir=tmp_path
+    )
+
+    output_file = tmp_path / "dist_feature_a.png"
+
+    assert not output_file.exists()
+
+
+def test_plot_feature_distributions_constant_values(tmp_path):
+
+    df = pd.DataFrame({
+        "assay": ["haem", "haem", "ST", "ST"],
+        "feature_a": [5, 5, 5, 5]
+    })
+
+    plot_feature_distributions(
+        df,
+        features=["feature_a"],
+        assay_col="assay",
+        out_dir=tmp_path
+    )
+
+    output_file = tmp_path / "dist_feature_a.png"
+
+    assert output_file.exists()
+    assert output_file.stat().st_size > 0

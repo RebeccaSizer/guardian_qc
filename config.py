@@ -37,16 +37,17 @@ QC_SUMMARY_PATTERN_HAEM_V3 = re.compile(r"^[0-9]{7}\.RMHhaemV3\.qc_summary\.tsv$
 SAMPLE_SHEET_PATTERN = re.compile(r"^SampleSheet\.csv$")
 
 # Specify output file locations for the QC summary files
-QC_FILE_PATHS = "data/raw/qc_summary_file_paths.csv"
+QC_FILE_PATHS = "raw/qc_summary_file_paths.csv"
 
 # Set output file location for files that pass run-level QC filtering and have all information for downstream analysis
-FILTERED_RUN_QC_DATA = "data/preprocessed/filtered_by_run_metrics(1).tsv"
+FILTERED_RUN_QC_DATA = "preprocessed/filtered_by_run_metrics(1).tsv"
 
 # Set file path to summary_qc_metrics.csv file
-SUMMARY_QC_METRICS = "data/preprocessed/summary_qc_metrics(2).tsv"
+SUMMARY_QC_METRICS = "preprocessed/summary_qc_metrics(2).tsv"
 
 # Path to plots 
 INGEST_PLOT_DIR = "outputs/graphs/ingest"
+
 #########################################
 # Set up variables for preprocessing.py
 #########################################
@@ -170,9 +171,9 @@ COL_TO_DROP_HAEM = [
 # set up variables for train_n.py
 #################################
 
-N_ESTIMATORS = 50 # The number of base estimators in the ensemble (Number of decision trees) - can up to 300 if needed
+N_ESTIMATORS = 100 # The number of base estimators in the ensemble (Number of decision trees) - can up to 300 if needed
 RANDOM_STATE = 42 # Controls the pseudo-randomness of the selection of the features and the split values - needed to build a reproducible random sequence
-MAX_SAMPLES = 512
+MAX_SAMPLES = 256
 MAX_FEATURES = 0.75
  
 # Top features to report
@@ -192,7 +193,15 @@ SHAP_COLUMNS = ["top_1_metric", "top_2_metric", "top_3_metric"]
 ROBUST_Z_COLUMNS = ["top_1_feature", "top_2_feature", "top_3_feature"]
 EVALUATE_OUTDIR = 'data/evaluate'
 
-OPT_N_ESTIMATORS = 50 # ST 100, Haem 50
-OPT_RANDOM_STATE = 42 # Controls the pseudo-randomness of the selection of the features and the split values - needed to build a reproducible random sequence
-OPT_MAX_SAMPLES = 512 #ST:256 Haem: 512
-OPT_MAX_FEATURES = 0.75
+# Set haem and st optimal parameters
+ST_N_ESTIMATORS = 100 # ST 100, Haem 50
+ST_RANDOM_STATE = 42 # Controls the pseudo-randomness of the selection of the features and the split values - needed to build a reproducible random sequence
+ST_MAX_SAMPLES = 256 #ST:256 Haem: 512
+ST_MAX_FEATURES = 0.75 # 0.75 for ST, 0.5 for Haem
+ST_CONCENTRATION = 0.15
+
+HAEM_N_ESTIMATORS = 50 # ST 100, Haem 50
+HAEM_RANDOM_STATE = 42 # Controls the pseudo-randomness of the selection of the features and the split values - needed to build a reproducible random sequence
+HAEM_MAX_SAMPLES = 512 #ST:256 Haem: 512
+HAEM_MAX_FEATURES = 0.5 # 0.75 for ST, 0.5 for Haem
+HAEM_CONCENTRATION = 0.08

@@ -652,12 +652,23 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    results = evaluate_model(
-        f'data/trained/{args.assay}/{args.version}/{args.assay}_{args.version}_c0.08, n100_ms256_mf1.0_test_scored.csv',
-        truth_file=os.path.join(config.TRUTH_SET_DIR, f'truth_set_{args.assay}_500.csv'),
-        assay=args.assay,
-        version=args.version,
-        out_dir=config.EVALUATE_OUTDIR,
-    )
-    graphs_for_evaluation(results, assay=args.assay, version=args.version, out_dir=os.path.join("outputs/graphs/evaluate/", args.assay, args.version))
+    if args.assay =='st':
+        results = evaluate_model(
+            f'data/trained/{args.assay}/{args.version}/{args.assay}_{args.version}_c{config.ST_CONCENTRATION}_n{config.ST_N_ESTIMATORS}_ms{config.ST_MAX_SAMPLES}_mf{config.ST_MAX_FEATURES}_test_scored.csv',
+            truth_file=os.path.join(config.TRUTH_SET_DIR, f'truth_set_{args.assay}_500.csv'),
+            assay=args.assay,
+            version=args.version,
+            out_dir=config.EVALUATE_OUTDIR,
+        )
+        graphs_for_evaluation(results, assay=args.assay, version=args.version, out_dir=os.path.join("outputs/graphs/evaluate/", args.assay, args.version))
 
+
+    if args.assay == 'haem':
+        results = evaluate_model(
+            f'data/trained/{args.assay}/{args.version}/{args.assay}_{args.version}_c{config.HAEM_CONCENTRATION}_n{config.HAEM_N_ESTIMATORS}_ms{config.HAEM_MAX_SAMPLES}_mf{config.HAEM_MAX_FEATURES}_test_scored.csv',
+            truth_file=os.path.join(config.TRUTH_SET_DIR, f'truth_set_{args.assay}_500.csv'),
+            assay=args.assay,
+            version=args.version,
+            out_dir=config.EVALUATE_OUTDIR,
+        )
+        graphs_for_evaluation(results, assay=args.assay, version=args.version, out_dir=os.path.join("outputs/graphs/evaluate/", args.assay, args.version))

@@ -287,8 +287,7 @@ def fix_data_types(data_frame):
     This fixes known issues with the data 
     before encoding or scaling.
     
-        - Remove '?' values from the Fold80 column
-        - Replace with NaN
+        - Remove any rows with '?' values from the Fold80 column
     
     params:
         dataframe containing QC metrics including picard_fold80 columns
@@ -724,7 +723,7 @@ def find_correlated_features(X_train, threshold=0.95):
 ######################
 
 # Plot a correlation matrix to determine which features to keep
-def plot_correlation_matrix(X_train: pd.DataFrame, assay: str, out_dir: str) -> None:
+def plot_correlation_matrix(X_train: pd.DataFrame, assay: str, out_dir: str) -> None: 
     corr = X_train.corr()
 
     fig, ax = plt.subplots(figsize=(16, 14))
@@ -844,7 +843,7 @@ def plot_feature_distributions(
 ##########################
 
 # Run preprocessing 
-def run_preprocessing(file_path: str, assay: str, version: str, out_dir: None):
+def run_preprocessing(file_path: str, assay: str, version: str, out_dir_file, out_dir_model: None):
     """
     This function strings together all of the preprocessing steps
     to prepare the data for training the machine learning model.
@@ -866,7 +865,16 @@ def run_preprocessing(file_path: str, assay: str, version: str, out_dir: None):
         train_meta: Meta data associated with the training dataset
         test_meta: Meta data associated with the test dataset 
     """
-    
+    # Create output directories
+    if out_dir_file is not None:
+        Path(out_dir_file).mkdir(parents=True, exist_ok=True)
+
+    if out_dir_model is not None:
+        output_file = Path(out_dir_file) / config.SUMMARY_QC_METRICS_CLEANED
+
+        # Create parent directories if they don't exist
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+
     # Load the input
     try:
         df = load_data(file_path)
@@ -880,7 +888,7 @@ def run_preprocessing(file_path: str, assay: str, version: str, out_dir: None):
     # Clean the data
     df = remove_duplicates(df)
     df = fix_data_types(df)
-    df.to_csv(config.SUMMARY_QC_METRICS_CLEANED, sep='\t', index=False)
+    df.to_csv(output_file, sep='\t', index=False)
 
 
     #plot_feature_distributions(
@@ -985,14 +993,14 @@ def run_preprocessing(file_path: str, assay: str, version: str, out_dir: None):
     plot_correlation_matrix(X_train, assay, os.path.join(config.PREPROCESSING_PLOT_DIR, 'metric_correlation_matrix_filtered/'))
     logging.info(f"Correlation matrix post processing saved for assay: {assay}")
 
-    if out_dir is not None:
-        save_transformers(ohe, imputer, scaler, vt, to_drop, assay, version, out_dir)
+    if out_dir_model is not None:
+        save_transformers(ohe, imputer, scaler, vt, to_drop, assay, version, out_dir_model)
 
     logging.info(f"Preprocessing complete. train_meta: {train_meta.shape} | X_train: {X_train.shape}")
     logging.info(f"Preprocessing complete. test_meta: {test_meta.shape} | X_test: {X_test.shape}")
     return X_train, X_test, train_meta, test_meta
 
-if __name__ == "__main__":
+if __name__ == "__main__": # pragma: no cover
 
     parser = argparse.ArgumentParser(
         description="Preprocess Guardian-QC data for a specific assay."
@@ -1023,7 +1031,8 @@ if __name__ == "__main__":
         file_path=config.SUMMARY_QC_METRICS,
         assay=args.assay,
         version=args.version,
-        out_dir=output_dir,
+        out_dir_file="data",
+        out_dir_model=output_dir,
     )
 
     logging.info(
