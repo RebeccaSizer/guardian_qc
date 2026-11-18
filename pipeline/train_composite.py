@@ -786,7 +786,7 @@ if __name__ == "__main__": # pragma: no cover
 
     args = parser.parse_args()
 
-    X_train, X_test, train_meta, test_meta = run_preprocessing(config.SUMMARY_QC_METRICS, args.assay, out_dir_file='data', out_dir_model=os.path.join(config.PREPROCESSING_OUTDIR, args.assay), version=args.version)
+    X_train, X_test, train_meta, test_meta = run_preprocessing(os.path.join('data', config.SUMMARY_QC_METRICS), args.assay, out_dir_file='data', out_dir_model=os.path.join(config.PREPROCESSING_OUTDIR, args.assay), version=args.version)
     
     if args.assay == 'st':
          # The default values are: contamination 0.08 for haem and 15% for st. n_estimators = 100, max_samples = 256, max_features = 1.0

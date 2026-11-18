@@ -1028,7 +1028,7 @@ if __name__ == "__main__": # pragma: no cover
     )
 
     X_train, X_test, train_meta, test_meta = run_preprocessing(
-        file_path=config.SUMMARY_QC_METRICS,
+        file_path=os.path.join('data', config.SUMMARY_QC_METRICS),
         assay=args.assay,
         version=args.version,
         out_dir_file="data",
