@@ -53,7 +53,7 @@ INGEST_PLOT_DIR = "outputs/graphs/ingest"
 #########################################
 
 
-SUMMARY_QC_METRICS_CLEANED = "data/preprocessed/cleaned_summary_qc_metrics(3).tsv"
+SUMMARY_QC_METRICS_CLEANED = "preprocessed/cleaned_summary_qc_metrics(3).tsv"
 
 # Set variables for preprocessing 
 # Define the model features 
@@ -194,14 +194,14 @@ ROBUST_Z_COLUMNS = ["top_1_feature", "top_2_feature", "top_3_feature"]
 EVALUATE_OUTDIR = 'data/evaluate'
 
 # Set haem and st optimal parameters
-ST_N_ESTIMATORS = 100 # ST 100, Haem 50
+ST_N_ESTIMATORS = 300 
 ST_RANDOM_STATE = 42 # Controls the pseudo-randomness of the selection of the features and the split values - needed to build a reproducible random sequence
-ST_MAX_SAMPLES = 256 #ST:256 Haem: 512
-ST_MAX_FEATURES = 0.75 # 0.75 for ST, 0.5 for Haem
+ST_MAX_SAMPLES = 512 
+ST_MAX_FEATURES = 0.75 
 ST_CONCENTRATION = 0.15
 
-HAEM_N_ESTIMATORS = 50 # ST 100, Haem 50
+HAEM_N_ESTIMATORS = 300
 HAEM_RANDOM_STATE = 42 # Controls the pseudo-randomness of the selection of the features and the split values - needed to build a reproducible random sequence
-HAEM_MAX_SAMPLES = 512 #ST:256 Haem: 512
-HAEM_MAX_FEATURES = 0.5 # 0.75 for ST, 0.5 for Haem
-HAEM_CONCENTRATION = 0.08
+HAEM_MAX_SAMPLES = 256 
+HAEM_MAX_FEATURES = 0.75 
+HAEM_CONCENTRATION = 0.07 

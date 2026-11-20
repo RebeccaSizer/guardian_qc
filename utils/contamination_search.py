@@ -366,7 +366,7 @@ def plot_parameter_results(metric, results_df, assay, version, split):
 def parameter_tuning(metric, summary_qc_metrics: str, assay: str, version: str, out_dir):
 
     # run the preprocessing step for the model 
-    X_train, X_test, train_meta, test_meta = run_preprocessing(summary_qc_metrics, assay, version, out_dir)
+    X_train, X_test, train_meta, test_meta = run_preprocessing(summary_qc_metrics, assay, version, out_dir, out_dir)
     
     # set default values for contamination, n_estimators, max_samples, and max_features
     contamination = 0.15 if assay == "st" else 0.08
@@ -474,5 +474,5 @@ if __name__=="__main__":
     )
 
     args= parser.parse_args()
-
-    parameter_tuning(args.metric, config.SUMMARY_QC_METRICS, assay=args.assay, version=args.version, out_dir=None)
+    out_dir=os.path.join("outputs/parameter_tuning/", args.assay, args.version, args.metric)
+    parameter_tuning(args.metric, os.path.join('data', config.SUMMARY_QC_METRICS), assay=args.assay, version=args.version, out_dir=out_dir)

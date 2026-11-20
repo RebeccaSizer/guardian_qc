@@ -65,10 +65,10 @@ def get_predicted_features(row: pd.Series, columns: list[str]) -> set[str]:
 
 
 def evaluate_reason_method(row: pd.Series, columns: list[str]) -> dict:
-    """Compare predicted explanation features against known truth features."""
+    """Check whether predicted features match known truth features."""
 
-    # truth_features is already a cleaned (lowercased) list built in evaluate_model.
     truth_features = row.get("truth_features")
+
     true_features = (
         set(truth_features)
         if isinstance(truth_features, (list, set, tuple))
@@ -77,34 +77,21 @@ def evaluate_reason_method(row: pd.Series, columns: list[str]) -> dict:
 
     predicted_features = get_predicted_features(row, columns)
 
-    # Explanation quality is only assessed for known anomalies.
-    is_anomaly = pd.notna(row["truth_anomaly"]) and row["truth_anomaly"] == -1
+    is_anomaly = (
+        pd.notna(row["truth_anomaly"])
+        and row["truth_anomaly"] == -1
+    )
 
     if not is_anomaly or not true_features:
-        return {
-            "predicted_features": sorted(predicted_features),
-            "matching_features": [],
-            "reason_hit": pd.NA,
-            "reason_precision": pd.NA,
-            "reason_recall": pd.NA,
-        }
+        return {"reason_hit": pd.NA}
 
     matches = true_features & predicted_features
 
     return {
-        "predicted_features": sorted(predicted_features),
-        "matching_features": sorted(matches),
-        "reason_hit": bool(matches),
-        "reason_precision": (
-            len(matches) / len(predicted_features)
-            if predicted_features else 0.0
-        ),
-        "reason_recall": len(matches) / len(true_features),
+        "reason_hit": bool(matches)
     }
 
-# ---------------------------------------------------------------------
-# Main evaluation function
-# ---------------------------------------------------------------------
+# main function to evaluate model predictions and explanations against a truth set
 
 def evaluate_model(
     scored_data: str | Path,
@@ -126,6 +113,7 @@ def evaluate_model(
     Writes the detailed evaluation CSVs to:
         out_dir / assay / version
     """
+    # Make directiory for evaluation results.
     result_dir = Path(out_dir) / assay / version
     result_dir.mkdir(parents=True, exist_ok=True)
 
@@ -133,7 +121,7 @@ def evaluate_model(
     model = pd.read_csv(scored_data)
     truth = pd.read_csv(truth_file)
 
-    # Identify all truth feature columns automatically.
+    # Identify all truth feature columns automatically from truth set.
     truth_feature_columns = [
         col for col in truth.columns
         if col.startswith("truth_feature_")
@@ -143,7 +131,7 @@ def evaluate_model(
     required_model = {
         "sample_name",
         "anomaly_label",
-        *config.SHAP_COLUMNS,
+        *config.SHAP_COLUMNS, # * unpacks the list into individual elements
         *config.ROBUST_Z_COLUMNS,
     }
 
@@ -178,7 +166,7 @@ def evaluate_model(
     truth = truth.dropna(subset=["sample_name"])
 
     # Standardise anomaly labels.
-    model["anomaly_label"] = model["anomaly_label"].map(normalise_label)
+    model["anomaly_label"] = model["anomaly_label"].map(normalise_label) # normalise_label converts the anomaly labels to -1 or 1
     truth["anomaly_label"] = truth["anomaly_label"].map(normalise_label)
 
     # Check that model output contains one record per sample.
@@ -195,33 +183,31 @@ def evaluate_model(
             f"evaluating. Examples: {duplicate_names[:10].tolist()}"
         )
 
-    # Check that each sample has one consistent truth anomaly label.
-    truth_label_counts = truth.groupby("sample_name")["anomaly_label"].nunique()
-    inconsistent = truth_label_counts[truth_label_counts > 1].index.tolist()
+    duplicate_truth_names = truth.loc[
+        truth["sample_name"].duplicated(keep=False), "sample_name"
+    ].unique()
 
-    if inconsistent:
+    if len(duplicate_truth_names):
         raise ValueError(
-            "Truth-set anomaly labels conflict within these samples: "
-            f"{inconsistent[:10]}"
+            "Duplicate sample_name values in truth set. "
+            f"Examples: {duplicate_truth_names[:10].tolist()}"
         )
 
     # Group truth data to create one record per sample.
     # Combine all truth_feature_* columns into a single list of features.
-    truth_by_sample = (
-        truth.groupby("sample_name")
-        .apply(
-            lambda group: pd.Series({
-                "truth_anomaly": group["anomaly_label"].iloc[0],
-                "truth_features": sorted({
-                    feature
-                    for col in truth_feature_columns
-                    for value in group[col]
-                    if (feature := clean_feature(value)) is not None
-                }),
-            }),
-            include_groups=False,
-        )
-        .reset_index()
+    truth_by_sample = truth[["sample_name", "anomaly_label"]].copy()
+
+    truth_by_sample = truth_by_sample.rename(
+        columns={"anomaly_label": "truth_anomaly"}
+    )
+
+    truth_by_sample["truth_features"] = truth[truth_feature_columns].apply(
+        lambda row: sorted({
+            feature
+            for value in row
+            if (feature := clean_feature(value)) is not None
+        }),
+        axis=1
     )
 
     # Match truth samples to model predictions.
@@ -230,17 +216,35 @@ def evaluate_model(
         model,
         on="sample_name",
         how="left",
-        indicator=True,
+        indicator=True, # indicates if the sample was found in both datasets or only in one
         validate="one_to_one",
     )
 
+    # Identify whether each truth sample is present in the model output.
+    # Identify whether each truth sample is present in the model output.
     evaluation["sample_present"] = evaluation["_merge"].eq("both")
+
+    # Check that at least one sample matched between the two datasets.
+    if not evaluation["sample_present"].any():
+        raise ValueError("No sample names matched between model and truth set.")
+
+    # Check for missing predictions in matched samples only.
+    if evaluation.loc[
+        evaluation["sample_present"], "anomaly_label"
+    ].isna().any():
+        raise ValueError(
+            "Matched samples contain missing anomaly_label predictions."
+        )
+
+    # The merge indicator is no longer needed.
     evaluation.drop(columns="_merge", inplace=True)
 
     # Identify whether each model classification agrees with the truth.
     evaluation["classification_correct"] = (
         evaluation["sample_present"]
-        & evaluation["truth_anomaly"].eq(evaluation["anomaly_label"])
+        & evaluation["truth_anomaly"].eq(
+            evaluation["anomaly_label"]
+        ).fillna(False)
     )
 
     evaluation.to_csv(
@@ -272,6 +276,8 @@ def evaluate_model(
     # Only matched samples can be used for classification evaluation.
     matched = evaluation.loc[evaluation["sample_present"]].copy()
 
+    matched["anomaly_label"] = matched["anomaly_label"].astype(int)
+
     if matched.empty:
         raise ValueError(
             "No sample names matched between model output and truth set."
@@ -299,13 +305,13 @@ def evaluate_model(
         "sample_name",
     ]
 
-    print("\nFALSE POSITIVE SAMPLES")
-    print(f"Count: {len(false_positives)}")
-    print(false_positives.to_string(index=False))
+    logging.info("\nFALSE POSITIVE SAMPLES")
+    logging.info(f"Count: {len(false_positives)}")
+    logging.info(false_positives.to_string(index=False))
 
-    print("\nFALSE NEGATIVE SAMPLES")
-    print(f"Count: {len(false_negatives)}")
-    print(false_negatives.to_string(index=False))
+    logging.info("\nFALSE NEGATIVE SAMPLES")
+    logging.info(f"Count: {len(false_negatives)}")
+    logging.info(false_negatives.to_string(index=False))
 
     # Calculate the confusion matrix.
     # Labels are ordered [normal, anomaly]:
@@ -349,11 +355,11 @@ def evaluate_model(
         index=False,
     )
 
-    print("\nCLASSIFICATION PERFORMANCE")
-    print(pd.Series(classification_metrics).to_string())
+    logging.info("\nCLASSIFICATION PERFORMANCE")
+    logging.info(pd.Series(classification_metrics).to_string())
 
-    print("\nCLASSIFICATION REPORT")
-    print(
+    logging.info("\nCLASSIFICATION REPORT")
+    logging.info(
         classification_report(
             y_true,
             y_pred,
@@ -396,24 +402,15 @@ def evaluate_model(
 
     for method_name in ["shap", "robust_z"]:
         hit_col = f"{method_name}_reason_hit"
-        precision_col = f"{method_name}_reason_precision"
-        recall_col = f"{method_name}_reason_recall"
 
-        # Columns mix pd.NA with numbers (object dtype), so force numeric.
-        hits = pd.to_numeric(valid[hit_col], errors="coerce").dropna()
-        precisions = pd.to_numeric(valid[precision_col], errors="coerce")
-        recalls = pd.to_numeric(valid[recall_col], errors="coerce")
+        hits = valid[hit_col].dropna()
 
         summaries.append({
             "method": method_name,
             "anomalous_samples_with_reference_reasons": len(valid),
             "samples_with_any_correct_reason": int(hits.sum()),
-            "reason_hit_rate": hits.mean() if len(hits) else float("nan"),
-            "mean_reason_precision": (
-                precisions.mean() if precisions.notna().any() else float("nan")
-            ),
-            "mean_reason_recall": (
-                recalls.mean() if recalls.notna().any() else float("nan")
+            "reason_hit_rate": (
+                hits.mean() if len(hits) else float("nan")
             ),
         })
 
@@ -424,10 +421,8 @@ def evaluate_model(
         index=False,
     )
 
-    print("\nREASON METHOD COMPARISON")
-    print(reason_summary.to_string(index=False))
-
-    print(f"\nEvaluation files saved to: {result_dir.resolve()}")
+    logging.info("\nREASON METHOD COMPARISON")
+    logging.info(reason_summary.to_string(index=False))
 
     return {
         "evaluation": evaluation,
@@ -523,37 +518,6 @@ def graphs_for_evaluation(results: dict, assay: str, version: str, out_dir) -> N
             )
     fig.tight_layout()
     fig.savefig(plot_dir / "reason_hit_rate_comparison.png", dpi=300)
-    plt.close(fig)
-
-    # 4. Explanation precision and recall
-    reason_metrics = reason_summary.set_index("method").reindex(["shap", "robust_z"])
-    x = np.arange(2)
-    width = 0.35
-    fig, ax = plt.subplots(figsize=(8, 5))
-    precision_bars = ax.bar(
-        x - width / 2, reason_metrics["mean_reason_precision"], width,
-        label="Reason precision",
-    )
-    recall_bars = ax.bar(
-        x + width / 2, reason_metrics["mean_reason_recall"], width,
-        label="Reason recall",
-    )
-    ax.set_xticks(x)
-    ax.set_xticklabels(["SHAP", "Robust z-score (MAD)"])
-    ax.set_ylim(0, 1)
-    ax.set_ylabel("Score")
-    ax.set_title("Explanation Quality: SHAP vs Robust z-score")
-    ax.legend()
-    for bars in [precision_bars, recall_bars]:
-        for bar in bars:
-            value = bar.get_height()
-            if np.isfinite(value):
-                ax.text(
-                    bar.get_x() + bar.get_width() / 2, value + 0.02,
-                    f"{value:.2f}", ha="center", va="bottom", fontsize=9,
-                )
-    fig.tight_layout()
-    fig.savefig(plot_dir / "reason_precision_recall.png", dpi=300)
     plt.close(fig)
 
     # 5. Anomaly-score distributions by true class
