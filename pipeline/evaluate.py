@@ -221,13 +221,30 @@ def evaluate_model(
     )
 
     # Identify whether each truth sample is present in the model output.
-    evaluation["sample_present"] = evaluation["_merge"].eq("both") # merge column equal to 'both'
-    evaluation.drop(columns="_merge", inplace=True)  # drop the _merge column as it's no longer needed
+    # Identify whether each truth sample is present in the model output.
+    evaluation["sample_present"] = evaluation["_merge"].eq("both")
+
+    # Check that at least one sample matched between the two datasets.
+    if not evaluation["sample_present"].any():
+        raise ValueError("No sample names matched between model and truth set.")
+
+    # Check for missing predictions in matched samples only.
+    if evaluation.loc[
+        evaluation["sample_present"], "anomaly_label"
+    ].isna().any():
+        raise ValueError(
+            "Matched samples contain missing anomaly_label predictions."
+        )
+
+    # The merge indicator is no longer needed.
+    evaluation.drop(columns="_merge", inplace=True)
 
     # Identify whether each model classification agrees with the truth.
     evaluation["classification_correct"] = (
         evaluation["sample_present"]
-        & evaluation["truth_anomaly"].eq(evaluation["anomaly_label"])
+        & evaluation["truth_anomaly"].eq(
+            evaluation["anomaly_label"]
+        ).fillna(False)
     )
 
     evaluation.to_csv(
@@ -258,6 +275,8 @@ def evaluate_model(
 
     # Only matched samples can be used for classification evaluation.
     matched = evaluation.loc[evaluation["sample_present"]].copy()
+
+    matched["anomaly_label"] = matched["anomaly_label"].astype(int)
 
     if matched.empty:
         raise ValueError(

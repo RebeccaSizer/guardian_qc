@@ -48,17 +48,25 @@ X_train, X_test, train_meta, test_meta = run_preprocessing(
     )
 
 if args.assay == 'haem':
-    contamination = 0.08
-
+    contamination = config.HAEM_CONCENTRATION
+    n_estimators = config.HAEM_N_ESTIMATORS
+    max_samples = config.HAEM_MAX_SAMPLES
+    max_features = config.HAEM_MAX_FEATURES
+    random_state = config.HAEM_RANDOM_STATE
+    
 elif args.assay == 'st':
-    contamination = 0.15
+    contamination = config.ST_CONCENTRATION
+    n_estimators = config.ST_N_ESTIMATORS
+    max_samples = config.ST_MAX_SAMPLES
+    max_features = config.ST_MAX_FEATURES
+    random_state = config.ST_RANDOM_STATE
 
 # The default values are: contamination 0.08 for haem and 15% for st. n_estimators = 100, max_samples = 256, max_features = 1.0
-explained_model_train, explained_model_test = run_model_train(X_train, X_test, train_meta, test_meta, args.assay, args.version, contamination, config.OPT_N_ESTIMATORS, config.OPT_MAX_SAMPLES, config.OPT_MAX_FEATURES, os.path.join(config.TRAINED_OUTPUT_DATA, args.assay, args.version ))
+explained_model_train, explained_model_test = run_model_train(X_train, X_test, train_meta, test_meta, args.assay, args.version, contamination, n_estimators, max_samples, max_features, os.path.join(config.TRAINED_OUTPUT_DATA, args.assay, args.version ))
 
 
 results = evaluate_model(
-    f'data/trained/{args.assay}/{args.version}/{args.assay}_{args.version}_c{contamination}, n{config.OPT_N_ESTIMATORS}_ms{config.OPT_MAX_SAMPLES}_mf{config.OPT_MAX_FEATURES}_test_scored.csv',
+    f'data/trained/{args.assay}/{args.version}/{args.assay}_{args.version}_c{contamination}_n{n_estimators}_ms{max_samples}_mf{max_features}_test_scored.csv',
     truth_file=os.path.join(config.TRUTH_SET_DIR, f'truth_set_{args.assay}_500.csv'),
     assay=args.assay,
     version=args.version,
